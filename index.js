@@ -4,7 +4,6 @@ const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const net = require('net');
 const { setTimeout } = require('timers/promises');
-const tunnel = require('tunnel');
 
 puppeteer.use(StealthPlugin());
 
@@ -283,9 +282,9 @@ class SessionRunner {
         const page = await browser.newPage();
         
         try {
-            // Set random viewport
-            const width = Math.floor(Math.random() * (1920 - 1200) + 1200;
-            const height = Math.floor(Math.random() * (1080 - 800) + 800;
+            // Set random viewport (FIXED SYNTAX)
+            const width = Math.floor(Math.random() * (1920 - 1200)) + 1200;
+            const height = Math.floor(Math.random() * (1080 - 800)) + 800;
             await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
             // Block unnecessary resources
@@ -312,8 +311,8 @@ class SessionRunner {
             console.log(`   ⏳ Waiting for video player...`);
             await page.waitForSelector('.html5-video-player', { timeout: 15000 });
 
-            // Watch for 30-90 seconds
-            const watchTime = Math.floor(Math.random() * (90000 - 30000) + 30000;
+            // Watch for 30-90 seconds (FIXED SYNTAX)
+            const watchTime = Math.floor(Math.random() * (90000 - 30000)) + 30000;
             console.log(`   ⏱️ Watching for ${Math.round(watchTime/1000)} seconds`);
             
             await page.waitForTimeout(watchTime);
