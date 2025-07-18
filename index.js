@@ -11,8 +11,6 @@ puppeteer.use(StealthPlugin());
 const PROXY_SOURCES = [
     'https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc',
     'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http',
-    'https://raw.githubusercontent.com/roosterkid/openproxylist/main/http.txt',
-    'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt'
 ];
 
 const USER_AGENT_SOURCES = [
@@ -113,7 +111,7 @@ class ProxyManager {
         return this.testProxyWithYouTube(proxy);
     }
 
-    async findWorkingProxies(requiredCount = 3, maxTests = 300) {
+    async findWorkingProxies(requiredCount = 3, maxTests = 1000) {
         console.log('🧪 Verifying proxies...');
         
         const shuffledProxies = [...this.proxies].sort(() => 0.5 - Math.random());
