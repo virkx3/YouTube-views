@@ -7,7 +7,7 @@ const { setTimeout } = require('timers/promises');
 
 puppeteer.use(StealthPlugin());
 
-// Premium proxy sources with higher reliability
+// Proxy sources
 const PROXY_SOURCES = [
     'https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc',
     'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http',
@@ -27,7 +27,7 @@ class ProxyManager {
     }
 
     async initialize() {
-        console.log('🔍 Fetching proxies from premium sources...');
+        console.log('🔍 Fetching proxies...');
         await this.refreshProxies();
     }
 
@@ -41,7 +41,7 @@ class ProxyManager {
                 result.status === 'fulfilled' ? result.value : []
             );
             
-            console.log(`💾 Loaded ${this.proxies.length} proxies from ${PROXY_SOURCES.length} sources`);
+            console.log(`💾 Loaded ${this.proxies.length} proxies`);
         } catch (error) {
             console.error('Failed to fetch proxies:', error.message);
             this.proxies = [];
@@ -100,7 +100,6 @@ class ProxyManager {
             });
             return true;
         } catch (error) {
-            // Some proxies might return 403 but are still usable
             if (error.response && error.response.status === 403) {
                 return true;
             }
@@ -109,18 +108,14 @@ class ProxyManager {
     }
 
     async verifyProxy(proxy) {
-        // First check basic connectivity
         const isAlive = await this.testProxyConnectivity(proxy);
         if (!isAlive) return false;
-        
-        // Then test with YouTube
         return this.testProxyWithYouTube(proxy);
     }
 
-    async findWorkingProxies(requiredCount = 5, maxTests = 500) {
-        console.log('🧪 Verifying proxies (2-step process)...');
+    async findWorkingProxies(requiredCount = 3, maxTests = 300) {
+        console.log('🧪 Verifying proxies...');
         
-        // Shuffle proxies to test different ones each time
         const shuffledProxies = [...this.proxies].sort(() => 0.5 - Math.random());
         let tested = 0;
         let found = 0;
@@ -137,7 +132,6 @@ class ProxyManager {
                 console.log(`✅ Working proxy: ${proxy} (${found}/${requiredCount})`);
             }
             
-            // Show progress every 50 proxies
             if (tested % 50 === 0) {
                 console.log(`   Tested ${tested} proxies, found ${found} working`);
             }
@@ -151,7 +145,7 @@ class ProxyManager {
         if (this.workingProxies.length > 0) {
             return this.workingProxies[Math.floor(Math.random() * this.workingProxies.length)];
         }
-        return null; // No proxy available
+        return null;
     }
 }
 
@@ -221,7 +215,6 @@ class VideoManager {
                 .map(v => v.trim())
                 .filter(v => v.length > 0);
             
-            // Add fallback videos if list is empty
             if (this.videos.length === 0) {
                 this.videos = this.getDefaultVideos();
             }
@@ -233,9 +226,9 @@ class VideoManager {
 
     getDefaultVideos() {
         return [
-            'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Rick Astley
-            'https://www.youtube.com/watch?v=jNQXAC9IVRw', // First YouTube video
-            'https://www.youtube.com/watch?v=9bZkp7q19f0' // Gangnam Style
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+            'https://www.youtube.com/watch?v=9bZkp7q19f0'
         ];
     }
 
@@ -269,7 +262,6 @@ class SessionRunner {
             `--user-agent=${userAgent}`
         ];
 
-        // Add proxy if available
         if (proxy) {
             browserArgs.push(`--proxy-server=http://${proxy}`);
         }
@@ -282,12 +274,10 @@ class SessionRunner {
         const page = await browser.newPage();
         
         try {
-            // Set random viewport (FIXED SYNTAX)
             const width = Math.floor(Math.random() * (1920 - 1200)) + 1200;
             const height = Math.floor(Math.random() * (1080 - 800)) + 800;
             await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
-            // Block unnecessary resources
             await page.setRequestInterception(true);
             page.on('request', req => {
                 if (['image', 'font', 'stylesheet', 'media'].includes(req.resourceType())) {
@@ -297,27 +287,35 @@ class SessionRunner {
                 }
             });
 
-            // Navigate to YouTube
             console.log(`   🌐 Navigating to video...`);
             await page.goto(video, {
                 waitUntil: 'domcontentloaded',
                 timeout: 60000
             });
 
-            // Handle ads
             await this.handleAds(page);
 
-            // Wait for video player
-            console.log(`   ⏳ Waiting for video player...`);
-            await page.waitForSelector('.html5-video-player', { timeout: 15000 });
+            // Increased timeout to 30 seconds
+            console.log(`   ⏳ Waiting for video player (30s timeout)...`);
+            try {
+                await page.waitForSelector('.html5-video-player', { timeout: 30000 });
+            } catch (error) {
+                console.log('   ⚠️ Video player not found, checking if video exists');
+                const videoExists = await page.evaluate(() => {
+                    return document.querySelector('video') !== null;
+                });
+                if (!videoExists) {
+                    throw new Error('Video player not found after extended timeout');
+                }
+            }
 
-            // Watch for 30-90 seconds (FIXED SYNTAX)
             const watchTime = Math.floor(Math.random() * (90000 - 30000)) + 30000;
             console.log(`   ⏱️ Watching for ${Math.round(watchTime/1000)} seconds`);
             
-            await page.waitForTimeout(watchTime);
+            // Use native setTimeout instead of waitForTimeout
+            await new Promise(resolve => setTimeout(resolve, watchTime));
 
-            console.log(`✅ Session #${sessionId} completed successfully`);
+            console.log(`✅ Session #${sessionId} completed`);
             return true;
         } catch (error) {
             console.error(`   ⚠️ Session error: ${error.message}`);
@@ -329,21 +327,18 @@ class SessionRunner {
 
     async handleAds(page) {
         try {
-            // Handle consent dialog
             await page.waitForSelector('button:has-text("Accept"), button:has-text("AGREE")', { timeout: 5000 });
             await page.click('button:has-text("Accept"), button:has-text("AGREE")');
             console.log('   ✅ Accepted consent dialog');
         } catch {}
 
         try {
-            // Skip video ads
             await page.waitForSelector('.ytp-ad-skip-button', { timeout: 3000 });
             await page.click('.ytp-ad-skip-button');
             console.log('   ⏩ Skipped video ad');
         } catch {}
 
         try {
-            // Close banner ads
             await page.waitForSelector('.ytp-ad-overlay-close-button', { timeout: 3000 });
             await page.click('.ytp-ad-overlay-close-button');
             console.log('   🚫 Closed banner ad');
@@ -354,7 +349,6 @@ class SessionRunner {
 // Main execution
 (async () => {
     try {
-        // Initialize managers
         const proxyManager = new ProxyManager();
         const userAgentManager = new UserAgentManager();
         const videoManager = new VideoManager();
@@ -365,7 +359,6 @@ class SessionRunner {
             videoManager.initialize()
         ]);
 
-        // Find working proxies with more reliable testing
         await proxyManager.findWorkingProxies();
         
         if (proxyManager.workingProxies.length === 0) {
@@ -374,10 +367,8 @@ class SessionRunner {
             console.log(`💡 Using ${proxyManager.workingProxies.length} verified proxies`);
         }
 
-        // Create session runner
         const sessionRunner = new SessionRunner(proxyManager, userAgentManager, videoManager);
         
-        // Run sessions sequentially with delays
         const SESSION_COUNT = 5;
         const results = [];
         
@@ -387,7 +378,6 @@ class SessionRunner {
             const success = await sessionRunner.runSession(i);
             results.push(success);
             
-            // Add delay between sessions
             if (i < SESSION_COUNT) {
                 const delay = Math.floor(Math.random() * 30000) + 10000;
                 console.log(`\n⏳ Waiting ${Math.round(delay/1000)}s before next session...`);
@@ -395,7 +385,6 @@ class SessionRunner {
             }
         }
         
-        // Report results
         const successCount = results.filter(Boolean).length;
         console.log(`\n🎉 Completed ${SESSION_COUNT} sessions. Successful: ${successCount}/${SESSION_COUNT}`);
     } catch (error) {
