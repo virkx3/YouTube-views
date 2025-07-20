@@ -68,7 +68,7 @@ class ProxyManager {
             const socket = net.createConnection({
                 host: host,
                 port: parseInt(port),
-                timeout: 3000
+                timeout: 10000
             });
             
             socket.on('connect', () => {
@@ -89,7 +89,7 @@ class ProxyManager {
         try {
             const agent = new HttpsProxyAgent(`http://${proxy}`);
             await axios.get('https://www.youtube.com', {
-                timeout: 10000,
+                timeout: 15000,
                 httpsAgent: agent,
                 headers: { 
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
