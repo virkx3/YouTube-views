@@ -6,8 +6,6 @@ const net = require('net');
 const { setTimeout } = require('timers/promises');
 const fs = require('fs');
 const path = require('path');
-const { Octokit } = require('@octokit/rest');
-const { createReadStream } = require('fs');
 
 puppeteer.use(StealthPlugin());
 
@@ -47,10 +45,8 @@ class GitHubUploader {
             return;
         }
         
-        this.octokit = new Octokit({ auth: GITHUB_TOKEN });
         this.enabled = true;
-        this.repoOwner = GITHUB_REPO.split('/')[0];
-        this.repoName = GITHUB_REPO.split('/')[1];
+        [this.repoOwner, this.repoName] = GITHUB_REPO.split('/');
     }
 
     async uploadScreenshot(filePath, sessionId) {
@@ -58,19 +54,27 @@ class GitHubUploader {
         
         try {
             const fileName = `screenshot-${sessionId}-${Date.now()}.png`;
-            const content = fs.readFileSync(filePath, { encoding: 'base64' });
+            const fileContent = fs.readFileSync(filePath);
+            const contentBase64 = fileContent.toString('base64');
             
-            const { data } = await this.octokit.repos.createOrUpdateFileContents({
-                owner: this.repoOwner,
-                repo: this.repoName,
-                branch: GITHUB_BRANCH,
-                path: `screenshots/${fileName}`,
-                message: `Add screenshot for session ${sessionId}`,
-                content: content,
-            });
+            const response = await axios.put(
+                `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/contents/screenshots/${fileName}`,
+                {
+                    message: `Add screenshot for session ${sessionId}`,
+                    content: contentBase64,
+                    branch: GITHUB_BRANCH
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'User-Agent': 'YouTube Viewer'
+                    }
+                }
+            );
             
-            console.log(`   📸 Screenshot uploaded to GitHub: ${data.content.html_url}`);
-            return data.content.html_url;
+            console.log(`   📸 Screenshot uploaded to GitHub: ${response.data.content.html_url}`);
+            return response.data.content.html_url;
         } catch (error) {
             console.error('   ⚠️ Failed to upload screenshot to GitHub:', error.message);
             return null;
@@ -192,27 +196,24 @@ class SessionRunner {
             
             try {
                 // Try to find video player using multiple methods
-                await Promise.race([
-                    page.waitForSelector('video', { timeout: 30000 }),
-                    page.waitForSelector('.html5-video-player', { timeout: 30000 }),
-                    page.waitForSelector('#player-container', { timeout: 30000 })
-                ]);
+                await page.waitForSelector('video', { timeout: 30000 });
                 playerFound = true;
-                console.log('   ✅ Video player found');
+                console.log('   ✅ Found video element');
             } catch (err) {
-                console.log('   ⚠️ Could not detect video player with standard selectors');
+                console.log('   ⚠️ Video element not found, trying fallback');
             }
             
             if (!playerFound) {
-                // Fallback to JavaScript-based detection
-                playerFound = await page.evaluate(() => {
-                    return !!document.querySelector('video') || 
-                           !!document.querySelector('.html5-video-player') ||
-                           !!document.querySelector('#player-container');
-                });
-                
-                if (playerFound) {
+                try {
+                    await page.waitForFunction(() => {
+                        return document.querySelector('video') || 
+                               document.querySelector('.html5-video-player') ||
+                               document.querySelector('#player-container');
+                    }, { timeout: 30000 });
+                    playerFound = true;
                     console.log('   ✅ Video player detected via JavaScript');
+                } catch (err) {
+                    console.log('   ⚠️ Could not detect video player with JavaScript');
                 }
             }
             
@@ -226,8 +227,7 @@ class SessionRunner {
                 
                 // Check for YouTube errors
                 const errorText = await page.evaluate(() => {
-                    const errorEl = document.querySelector('#error-message');
-                    return errorEl ? errorEl.textContent.trim() : '';
+                    return document.querySelector('#error-message')?.textContent.trim() || '';
                 });
                 
                 if (errorText) {
@@ -274,11 +274,59 @@ class SessionRunner {
     }
 
     async handleAds(page) {
-        // ... (keep existing handleAds implementation) ...
+        try {
+            // Handle consent dialog
+            await page.waitForSelector('button:has-text("Accept"), button:has-text("AGREE")', { timeout: 5000 });
+            await page.click('button:has-text("Accept"), button:has-text("AGREE")');
+            console.log('   ✅ Accepted consent dialog');
+        } catch {}
+
+        try {
+            // Skip video ads
+            await page.waitForSelector('.ytp-ad-skip-button', { timeout: 3000 });
+            await page.click('.ytp-ad-skip-button');
+            console.log('   ⏩ Skipped video ad');
+        } catch {}
+
+        try {
+            // Close banner ads
+            await page.waitForSelector('.ytp-ad-overlay-close-button', { timeout: 3000 });
+            await page.click('.ytp-ad-overlay-close-button');
+            console.log('   🚫 Closed banner ad');
+        } catch {}
     }
 
     async simulateHumanBehavior(page) {
-        // ... (keep existing simulateHumanBehavior implementation) ...
+        try {
+            // Random mouse movements
+            const viewport = page.viewport();
+            const steps = Math.floor(Math.random() * 5) + 3;
+            for (let i = 0; i < steps; i++) {
+                const x = Math.random() * viewport.width;
+                const y = Math.random() * viewport.height;
+                await page.mouse.move(x, y, { steps: 10 });
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            // Random scrolling
+            const scrollAmount = Math.floor(Math.random() * 500) + 200;
+            await page.evaluate(scrollAmount => {
+                window.scrollBy(0, scrollAmount);
+            }, scrollAmount);
+            
+            // Random pauses
+            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 3000));
+            
+            // Random keyboard interactions
+            if (Math.random() > 0.7) {
+                await page.keyboard.press('Space');
+                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 4000));
+                await page.keyboard.press('Space');
+            }
+            
+        } catch (error) {
+            console.log('   ⚠️ Human behavior simulation error:', error.message);
+        }
     }
 }
 
