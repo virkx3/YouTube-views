@@ -26,15 +26,220 @@ const USER_AGENT_SOURCES = [
 ];
 
 class ProxyManager {
-    // ... (keep existing ProxyManager implementation) ...
+    constructor() {
+        this.proxies = [];
+        this.workingProxies = [];
+    }
+
+    async initialize() {
+        console.log('🔍 Fetching proxies...');
+        await this.refreshProxies();
+    }
+
+    async refreshProxies() {
+        try {
+            const results = await Promise.allSettled(
+                PROXY_SOURCES.map(url => this.fetchProxies(url))
+            );
+            
+            this.proxies = results.flatMap(result => 
+                result.status === 'fulfilled' ? result.value : []
+            );
+            
+            console.log(`💾 Loaded ${this.proxies.length} proxies`);
+        } catch (error) {
+            console.error('Failed to fetch proxies:', error.message);
+            this.proxies = [];
+        }
+    }
+
+    async fetchProxies(url) {
+        try {
+            if (url.includes('geonode')) {
+                const response = await axios.get(url, { timeout: 10000 });
+                return response.data.data.map(p => `${p.ip}:${p.port}`);
+            }
+            
+            const response = await axios.get(url, { timeout: 10000 });
+            return response.data.split(/\r?\n/)
+                .map(p => p.trim())
+                .filter(p => p && net.isIP(p.split(':')[0]) !== 0);
+        } catch {
+            return [];
+        }
+    }
+
+    async testProxyConnectivity(proxy) {
+        return new Promise(resolve => {
+            const [host, port] = proxy.split(':');
+            const socket = net.createConnection({
+                host: host,
+                port: parseInt(port),
+                timeout: 10000
+            });
+            
+            socket.on('connect', () => {
+                socket.end();
+                resolve(true);
+            });
+            
+            socket.on('timeout', () => {
+                socket.destroy();
+                resolve(false);
+            });
+            
+            socket.on('error', () => resolve(false));
+        });
+    }
+
+    async testProxyWithYouTube(proxy) {
+        try {
+            const agent = new HttpsProxyAgent(`http://${proxy}`);
+            await axios.get('https://www.youtube.com', {
+                timeout: 15000,
+                httpsAgent: agent,
+                headers: { 
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+            });
+            return true;
+        } catch (error) {
+            if (error.response && error.response.status === 403) {
+                return true;
+            }
+            return false;
+        }
+    }
+
+    async verifyProxy(proxy) {
+        const isAlive = await this.testProxyConnectivity(proxy);
+        if (!isAlive) return false;
+        return this.testProxyWithYouTube(proxy);
+    }
+
+    async findWorkingProxies(requiredCount = 3, maxTests = 1000) {
+        console.log('🧪 Verifying proxies...');
+        
+        const shuffledProxies = [...this.proxies].sort(() => 0.5 - Math.random());
+        let tested = 0;
+        let found = 0;
+        
+        for (const proxy of shuffledProxies) {
+            if (found >= requiredCount || tested >= maxTests) break;
+            
+            tested++;
+            const isValid = await this.verifyProxy(proxy);
+            
+            if (isValid) {
+                found++;
+                this.workingProxies.push(proxy);
+                console.log(`✅ Working proxy: ${proxy} (${found}/${requiredCount})`);
+            }
+            
+            if (tested % 50 === 0) {
+                console.log(`   Tested ${tested} proxies, found ${found} working`);
+            }
+        }
+        
+        console.log(`🔚 Tested ${tested} proxies, found ${found} working`);
+        return this.workingProxies;
+    }
+
+    getRandomProxy() {
+        if (this.workingProxies.length > 0) {
+            return this.workingProxies[Math.floor(Math.random() * this.workingProxies.length)];
+        }
+        return null;
+    }
 }
 
 class UserAgentManager {
-    // ... (keep existing UserAgentManager implementation) ...
+    constructor() {
+        this.userAgents = [];
+    }
+
+    async initialize() {
+        console.log('🔍 Fetching user agents...');
+        try {
+            const results = await Promise.allSettled(
+                USER_AGENT_SOURCES.map(url => this.fetchUserAgents(url))
+            );
+            
+            this.userAgents = results.flatMap(result => 
+                result.status === 'fulfilled' ? result.value : []
+            );
+            
+            console.log(`💾 Loaded ${this.userAgents.length} user agents`);
+        } catch (error) {
+            console.error('Failed to fetch user agents:', error.message);
+            this.userAgents = this.getDefaultUserAgents();
+        }
+    }
+
+    async fetchUserAgents(url) {
+        try {
+            const response = await axios.get(url, { timeout: 10000 });
+            return response.data.split(/\r?\n/)
+                .map(ua => ua.trim())
+                .filter(ua => ua.length > 0);
+        } catch {
+            return [];
+        }
+    }
+
+    getDefaultUserAgents() {
+        return [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
+        ];
+    }
+
+    getRandomUserAgent() {
+        if (this.userAgents.length > 0) {
+            return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
+        }
+        return this.getDefaultUserAgents()[0];
+    }
 }
 
 class VideoManager {
-    // ... (keep existing VideoManager implementation) ...
+    constructor() {
+        this.videos = [];
+    }
+
+    async initialize() {
+        console.log('🔍 Fetching videos...');
+        try {
+            const response = await axios.get(
+                'https://raw.githubusercontent.com/virkx3/otp/main/youtube.txt',
+                { timeout: 10000 }
+            );
+            this.videos = response.data.split('\n')
+                .map(v => v.trim())
+                .filter(v => v.length > 0);
+            
+            if (this.videos.length === 0) {
+                this.videos = this.getDefaultVideos();
+            }
+        } catch {
+            this.videos = this.getDefaultVideos();
+        }
+        console.log(`💾 Loaded ${this.videos.length} videos`);
+    }
+
+    getDefaultVideos() {
+        return [
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+            'https://www.youtube.com/watch?v=9bZkp7q19f0'
+        ];
+    }
+
+    getRandomVideo() {
+        return this.videos[Math.floor(Math.random() * this.videos.length)];
+    }
 }
 
 class GitHubUploader {
@@ -338,47 +543,13 @@ class SessionRunner {
         const videoManager = new VideoManager();
         const githubUploader = new GitHubUploader();
         
-        await Promise.all([
-            proxyManager.initialize(),
-            userAgentManager.initialize(),
-            videoManager.initialize()
-        ]);
+        // Initialize all managers
+        await proxyManager.initialize();
+        await userAgentManager.initialize();
+        await videoManager.initialize();
 
+        // Find working proxies
         await proxyManager.findWorkingProxies();
         
         if (proxyManager.workingProxies.length === 0) {
             console.warn('⚠️ No working proxies found. Using direct connection');
-        } else {
-            console.log(`💡 Using ${proxyManager.workingProxies.length} verified proxies`);
-        }
-
-        const sessionRunner = new SessionRunner(
-            proxyManager, 
-            userAgentManager, 
-            videoManager,
-            githubUploader
-        );
-        
-        const SESSION_COUNT = 5;
-        const results = [];
-        
-        console.log(`\n🚀 Starting ${SESSION_COUNT} sessions`);
-        
-        for (let i = 1; i <= SESSION_COUNT; i++) {
-            const success = await sessionRunner.runSession(i);
-            results.push(success);
-            
-            if (i < SESSION_COUNT) {
-                const delay = Math.floor(Math.random() * 30000) + 10000;
-                console.log(`\n⏳ Waiting ${Math.round(delay/1000)}s before next session...`);
-                await setTimeout(delay);
-            }
-        }
-        
-        const successCount = results.filter(Boolean).length;
-        console.log(`\n🎉 Completed ${SESSION_COUNT} sessions. Successful: ${successCount}/${SESSION_COUNT}`);
-    } catch (error) {
-        console.error(`\n❌ Fatal error: ${error.message}`);
-        process.exit(1);
-    }
-})();
