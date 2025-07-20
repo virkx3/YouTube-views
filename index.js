@@ -19,220 +19,15 @@ const USER_AGENT_SOURCES = [
 ];
 
 class ProxyManager {
-    constructor() {
-        this.proxies = [];
-        this.workingProxies = [];
-    }
-
-    async initialize() {
-        console.log('🔍 Fetching proxies...');
-        await this.refreshProxies();
-    }
-
-    async refreshProxies() {
-        try {
-            const results = await Promise.allSettled(
-                PROXY_SOURCES.map(url => this.fetchProxies(url))
-            );
-            
-            this.proxies = results.flatMap(result => 
-                result.status === 'fulfilled' ? result.value : []
-            );
-            
-            console.log(`💾 Loaded ${this.proxies.length} proxies`);
-        } catch (error) {
-            console.error('Failed to fetch proxies:', error.message);
-            this.proxies = [];
-        }
-    }
-
-    async fetchProxies(url) {
-        try {
-            if (url.includes('geonode')) {
-                const response = await axios.get(url, { timeout: 10000 });
-                return response.data.data.map(p => `${p.ip}:${p.port}`);
-            }
-            
-            const response = await axios.get(url, { timeout: 10000 });
-            return response.data.split(/\r?\n/)
-                .map(p => p.trim())
-                .filter(p => p && net.isIP(p.split(':')[0]) !== 0);
-        } catch {
-            return [];
-        }
-    }
-
-    async testProxyConnectivity(proxy) {
-        return new Promise(resolve => {
-            const [host, port] = proxy.split(':');
-            const socket = net.createConnection({
-                host: host,
-                port: parseInt(port),
-                timeout: 10000
-            });
-            
-            socket.on('connect', () => {
-                socket.end();
-                resolve(true);
-            });
-            
-            socket.on('timeout', () => {
-                socket.destroy();
-                resolve(false);
-            });
-            
-            socket.on('error', () => resolve(false));
-        });
-    }
-
-    async testProxyWithYouTube(proxy) {
-        try {
-            const agent = new HttpsProxyAgent(`http://${proxy}`);
-            await axios.get('https://www.youtube.com', {
-                timeout: 15000,
-                httpsAgent: agent,
-                headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                }
-            });
-            return true;
-        } catch (error) {
-            if (error.response && error.response.status === 403) {
-                return true;
-            }
-            return false;
-        }
-    }
-
-    async verifyProxy(proxy) {
-        const isAlive = await this.testProxyConnectivity(proxy);
-        if (!isAlive) return false;
-        return this.testProxyWithYouTube(proxy);
-    }
-
-    async findWorkingProxies(requiredCount = 3, maxTests = 1000) {
-        console.log('🧪 Verifying proxies...');
-        
-        const shuffledProxies = [...this.proxies].sort(() => 0.5 - Math.random());
-        let tested = 0;
-        let found = 0;
-        
-        for (const proxy of shuffledProxies) {
-            if (found >= requiredCount || tested >= maxTests) break;
-            
-            tested++;
-            const isValid = await this.verifyProxy(proxy);
-            
-            if (isValid) {
-                found++;
-                this.workingProxies.push(proxy);
-                console.log(`✅ Working proxy: ${proxy} (${found}/${requiredCount})`);
-            }
-            
-            if (tested % 50 === 0) {
-                console.log(`   Tested ${tested} proxies, found ${found} working`);
-            }
-        }
-        
-        console.log(`🔚 Tested ${tested} proxies, found ${found} working`);
-        return this.workingProxies;
-    }
-
-    getRandomProxy() {
-        if (this.workingProxies.length > 0) {
-            return this.workingProxies[Math.floor(Math.random() * this.workingProxies.length)];
-        }
-        return null;
-    }
+    // ... (keep the existing ProxyManager class) ...
 }
 
 class UserAgentManager {
-    constructor() {
-        this.userAgents = [];
-    }
-
-    async initialize() {
-        console.log('🔍 Fetching user agents...');
-        try {
-            const results = await Promise.allSettled(
-                USER_AGENT_SOURCES.map(url => this.fetchUserAgents(url))
-            );
-            
-            this.userAgents = results.flatMap(result => 
-                result.status === 'fulfilled' ? result.value : []
-            );
-            
-            console.log(`💾 Loaded ${this.userAgents.length} user agents`);
-        } catch (error) {
-            console.error('Failed to fetch user agents:', error.message);
-            this.userAgents = this.getDefaultUserAgents();
-        }
-    }
-
-    async fetchUserAgents(url) {
-        try {
-            const response = await axios.get(url, { timeout: 10000 });
-            return response.data.split(/\r?\n/)
-                .map(ua => ua.trim())
-                .filter(ua => ua.length > 0);
-        } catch {
-            return [];
-        }
-    }
-
-    getDefaultUserAgents() {
-        return [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
-        ];
-    }
-
-    getRandomUserAgent() {
-        if (this.userAgents.length > 0) {
-            return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
-        }
-        return this.getDefaultUserAgents()[0];
-    }
+    // ... (keep the existing UserAgentManager class) ...
 }
 
 class VideoManager {
-    constructor() {
-        this.videos = [];
-    }
-
-    async initialize() {
-        console.log('🔍 Fetching videos...');
-        try {
-            const response = await axios.get(
-                'https://raw.githubusercontent.com/virkx3/otp/main/youtube.txt',
-                { timeout: 10000 }
-            );
-            this.videos = response.data.split('\n')
-                .map(v => v.trim())
-                .filter(v => v.length > 0);
-            
-            if (this.videos.length === 0) {
-                this.videos = this.getDefaultVideos();
-            }
-        } catch {
-            this.videos = this.getDefaultVideos();
-        }
-        console.log(`💾 Loaded ${this.videos.length} videos`);
-    }
-
-    getDefaultVideos() {
-        return [
-            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-            'https://www.youtube.com/watch?v=jNQXAC9IVRw',
-            'https://www.youtube.com/watch?v=9bZkp7q19f0'
-        ];
-    }
-
-    getRandomVideo() {
-        return this.videos[Math.floor(Math.random() * this.videos.length)];
-    }
+    // ... (keep the existing VideoManager class) ...
 }
 
 class SessionRunner {
@@ -257,6 +52,28 @@ class SessionRunner {
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-breakpad',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-default-apps',
+            '--disable-extensions',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-popup-blocking',
+            '--disable-prompt-on-repost',
+            '--disable-renderer-backgrounding',
+            '--disable-sync',
+            '--disable-translate',
+            '--metrics-recording-only',
+            '--no-first-run',
+            '--safebrowsing-disable-auto-update',
+            '--mute-audio',
             `--user-agent=${userAgent}`
         ];
 
@@ -265,20 +82,38 @@ class SessionRunner {
         }
 
         const browser = await puppeteer.launch({
-            headless: true,
-            args: browserArgs
+            headless: "new",  // Use the new headless mode
+            args: browserArgs,
+            ignoreHTTPSErrors: true
         });
 
         const page = await browser.newPage();
         
         try {
+            // Set random viewport
             const width = Math.floor(Math.random() * (1920 - 1200)) + 1200;
             const height = Math.floor(Math.random() * (1080 - 800)) + 800;
             await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
+            // Set additional stealth parameters
+            await page.evaluateOnNewDocument(() => {
+                delete navigator.__proto__.webdriver;
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5],
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en'],
+                });
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => Math.floor(Math.random() * 4) + 2,
+                });
+            });
+
+            // Block unnecessary resources
             await page.setRequestInterception(true);
             page.on('request', req => {
-                if (['image', 'font', 'stylesheet', 'media'].includes(req.resourceType())) {
+                const resourceType = req.resourceType();
+                if (['image', 'media', 'font', 'stylesheet', 'script'].includes(resourceType)) {
                     req.abort();
                 } else {
                     req.continue();
@@ -287,31 +122,63 @@ class SessionRunner {
 
             console.log(`   🌐 Navigating to video...`);
             await page.goto(video, {
-                waitUntil: 'domcontentloaded',
-                timeout: 60000
+                waitUntil: 'networkidle2',
+                timeout: 90000  // Increased timeout to 90 seconds
             });
 
             await this.handleAds(page);
 
-            // Increased timeout to 30 seconds
-            console.log(`   ⏳ Waiting for video player (30s timeout)...`);
+            // Enhanced video player detection
+            console.log(`   ⏳ Checking for video player...`);
+            let playerFound = false;
+            
             try {
-                await page.waitForSelector('.html5-video-player', { timeout: 30000 });
-            } catch (error) {
-                console.log('   ⚠️ Video player not found, checking if video exists');
-                const videoExists = await page.evaluate(() => {
-                    return document.querySelector('video') !== null;
-                });
-                if (!videoExists) {
-                    throw new Error('Video player not found after extended timeout');
+                // Try to find video player using multiple selectors
+                await page.waitForSelector('video', { timeout: 30000 });
+                playerFound = true;
+                console.log('   ✅ Found video element');
+            } catch (err) {
+                console.log('   ⚠️ Video element not found');
+            }
+            
+            if (!playerFound) {
+                try {
+                    await page.waitForSelector('.html5-video-player', { timeout: 10000 });
+                    playerFound = true;
+                    console.log('   ✅ Found HTML5 video player');
+                } catch (err) {
+                    console.log('   ⚠️ HTML5 video player not found');
                 }
             }
+            
+            if (!playerFound) {
+                // Last resort: check if YouTube is showing an error
+                const errorText = await page.evaluate(() => {
+                    const errorEl = document.querySelector('#error-message');
+                    return errorEl ? errorEl.textContent.trim() : '';
+                });
+                
+                if (errorText) {
+                    throw new Error(`YouTube error: ${errorText}`);
+                }
+                
+                // Take screenshot for debugging
+                await page.screenshot({ path: `error-${sessionId}.png` });
+                throw new Error('Video player not found');
+            }
+
+            // Simulate human-like viewing behavior
+            await this.simulateHumanBehavior(page);
 
             const watchTime = Math.floor(Math.random() * (90000 - 30000)) + 30000;
             console.log(`   ⏱️ Watching for ${Math.round(watchTime/1000)} seconds`);
             
-            // Use native setTimeout instead of waitForTimeout
-            await new Promise(resolve => setTimeout(resolve, watchTime));
+            // Simulate activity during viewing
+            const startTime = Date.now();
+            while (Date.now() - startTime < watchTime) {
+                await this.simulateHumanBehavior(page);
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
 
             console.log(`✅ Session #${sessionId} completed`);
             return true;
@@ -325,22 +192,60 @@ class SessionRunner {
 
     async handleAds(page) {
         try {
+            // Handle consent dialog
             await page.waitForSelector('button:has-text("Accept"), button:has-text("AGREE")', { timeout: 5000 });
             await page.click('button:has-text("Accept"), button:has-text("AGREE")');
             console.log('   ✅ Accepted consent dialog');
         } catch {}
 
         try {
+            // Skip video ads
             await page.waitForSelector('.ytp-ad-skip-button', { timeout: 3000 });
             await page.click('.ytp-ad-skip-button');
             console.log('   ⏩ Skipped video ad');
         } catch {}
 
         try {
+            // Close banner ads
             await page.waitForSelector('.ytp-ad-overlay-close-button', { timeout: 3000 });
             await page.click('.ytp-ad-overlay-close-button');
             console.log('   🚫 Closed banner ad');
         } catch {}
+    }
+
+    async simulateHumanBehavior(page) {
+        try {
+            // Random mouse movements
+            const viewport = page.viewport();
+            if (!viewport) return;
+            
+            const steps = Math.floor(Math.random() * 5) + 3;
+            for (let i = 0; i < steps; i++) {
+                const x = Math.random() * viewport.width;
+                const y = Math.random() * viewport.height;
+                await page.mouse.move(x, y, { steps: 10 });
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            // Random scrolling
+            const scrollAmount = Math.floor(Math.random() * 500) + 200;
+            await page.evaluate(scrollAmount => {
+                window.scrollBy(0, scrollAmount);
+            }, scrollAmount);
+            
+            // Random pauses
+            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 3000));
+            
+            // Random keyboard interactions
+            if (Math.random() > 0.7) {
+                await page.keyboard.press('Space');
+                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 4000));
+                await page.keyboard.press('Space');
+            }
+            
+        } catch (error) {
+            console.log('   ⚠️ Human behavior simulation error:', error.message);
+        }
     }
 }
 
