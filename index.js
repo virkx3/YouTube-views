@@ -4,8 +4,17 @@ const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const net = require('net');
 const { setTimeout } = require('timers/promises');
+const fs = require('fs');
+const path = require('path');
+const { Octokit } = require('@octokit/rest');
+const { createReadStream } = require('fs');
 
 puppeteer.use(StealthPlugin());
+
+// GitHub configuration
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_REPO = process.env.GITHUB_REPO; // Format: owner/repo
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 
 // Proxy sources
 const PROXY_SOURCES = [
@@ -19,22 +28,69 @@ const USER_AGENT_SOURCES = [
 ];
 
 class ProxyManager {
-    // ... (keep the existing ProxyManager class) ...
+    // ... (keep existing ProxyManager implementation) ...
 }
 
 class UserAgentManager {
-    // ... (keep the existing UserAgentManager class) ...
+    // ... (keep existing UserAgentManager implementation) ...
 }
 
 class VideoManager {
-    // ... (keep the existing VideoManager class) ...
+    // ... (keep existing VideoManager implementation) ...
+}
+
+class GitHubUploader {
+    constructor() {
+        if (!GITHUB_TOKEN || !GITHUB_REPO) {
+            console.warn('⚠️ GitHub credentials missing. Screenshots will be saved locally only.');
+            this.enabled = false;
+            return;
+        }
+        
+        this.octokit = new Octokit({ auth: GITHUB_TOKEN });
+        this.enabled = true;
+        this.repoOwner = GITHUB_REPO.split('/')[0];
+        this.repoName = GITHUB_REPO.split('/')[1];
+    }
+
+    async uploadScreenshot(filePath, sessionId) {
+        if (!this.enabled) return null;
+        
+        try {
+            const fileName = `screenshot-${sessionId}-${Date.now()}.png`;
+            const content = fs.readFileSync(filePath, { encoding: 'base64' });
+            
+            const { data } = await this.octokit.repos.createOrUpdateFileContents({
+                owner: this.repoOwner,
+                repo: this.repoName,
+                branch: GITHUB_BRANCH,
+                path: `screenshots/${fileName}`,
+                message: `Add screenshot for session ${sessionId}`,
+                content: content,
+            });
+            
+            console.log(`   📸 Screenshot uploaded to GitHub: ${data.content.html_url}`);
+            return data.content.html_url;
+        } catch (error) {
+            console.error('   ⚠️ Failed to upload screenshot to GitHub:', error.message);
+            return null;
+        }
+    }
 }
 
 class SessionRunner {
-    constructor(proxyManager, userAgentManager, videoManager) {
+    constructor(proxyManager, userAgentManager, videoManager, githubUploader) {
         this.proxyManager = proxyManager;
         this.userAgentManager = userAgentManager;
         this.videoManager = videoManager;
+        this.githubUploader = githubUploader;
+        this.screenshotDir = path.join(__dirname, 'screenshots');
+    }
+
+    async ensureScreenshotDir() {
+        if (!fs.existsSync(this.screenshotDir)) {
+            fs.mkdirSync(this.screenshotDir, { recursive: true });
+        }
     }
 
     async runSession(sessionId) {
@@ -82,7 +138,7 @@ class SessionRunner {
         }
 
         const browser = await puppeteer.launch({
-            headless: "new",  // Use the new headless mode
+            headless: "new",
             args: browserArgs,
             ignoreHTTPSErrors: true
         });
@@ -90,12 +146,14 @@ class SessionRunner {
         const page = await browser.newPage();
         
         try {
+            await this.ensureScreenshotDir();
+            
             // Set random viewport
             const width = Math.floor(Math.random() * (1920 - 1200)) + 1200;
             const height = Math.floor(Math.random() * (1080 - 800)) + 800;
             await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
-            // Set additional stealth parameters
+            // Set stealth parameters
             await page.evaluateOnNewDocument(() => {
                 delete navigator.__proto__.webdriver;
                 Object.defineProperty(navigator, 'plugins', {
@@ -113,7 +171,7 @@ class SessionRunner {
             await page.setRequestInterception(true);
             page.on('request', req => {
                 const resourceType = req.resourceType();
-                if (['image', 'media', 'font', 'stylesheet', 'script'].includes(resourceType)) {
+                if (['image', 'media', 'font', 'stylesheet'].includes(resourceType)) {
                     req.abort();
                 } else {
                     req.continue();
@@ -123,7 +181,7 @@ class SessionRunner {
             console.log(`   🌐 Navigating to video...`);
             await page.goto(video, {
                 waitUntil: 'networkidle2',
-                timeout: 90000  // Increased timeout to 90 seconds
+                timeout: 90000
             });
 
             await this.handleAds(page);
@@ -133,26 +191,40 @@ class SessionRunner {
             let playerFound = false;
             
             try {
-                // Try to find video player using multiple selectors
-                await page.waitForSelector('video', { timeout: 30000 });
+                // Try to find video player using multiple methods
+                await Promise.race([
+                    page.waitForSelector('video', { timeout: 30000 }),
+                    page.waitForSelector('.html5-video-player', { timeout: 30000 }),
+                    page.waitForSelector('#player-container', { timeout: 30000 })
+                ]);
                 playerFound = true;
-                console.log('   ✅ Found video element');
+                console.log('   ✅ Video player found');
             } catch (err) {
-                console.log('   ⚠️ Video element not found');
+                console.log('   ⚠️ Could not detect video player with standard selectors');
             }
             
             if (!playerFound) {
-                try {
-                    await page.waitForSelector('.html5-video-player', { timeout: 10000 });
-                    playerFound = true;
-                    console.log('   ✅ Found HTML5 video player');
-                } catch (err) {
-                    console.log('   ⚠️ HTML5 video player not found');
+                // Fallback to JavaScript-based detection
+                playerFound = await page.evaluate(() => {
+                    return !!document.querySelector('video') || 
+                           !!document.querySelector('.html5-video-player') ||
+                           !!document.querySelector('#player-container');
+                });
+                
+                if (playerFound) {
+                    console.log('   ✅ Video player detected via JavaScript');
                 }
             }
             
             if (!playerFound) {
-                // Last resort: check if YouTube is showing an error
+                const screenshotPath = path.join(this.screenshotDir, `error-${sessionId}.png`);
+                await page.screenshot({ path: screenshotPath });
+                console.log(`   📸 Saved screenshot to ${screenshotPath}`);
+                
+                // Upload to GitHub
+                await this.githubUploader.uploadScreenshot(screenshotPath, sessionId);
+                
+                // Check for YouTube errors
                 const errorText = await page.evaluate(() => {
                     const errorEl = document.querySelector('#error-message');
                     return errorEl ? errorEl.textContent.trim() : '';
@@ -162,9 +234,7 @@ class SessionRunner {
                     throw new Error(`YouTube error: ${errorText}`);
                 }
                 
-                // Take screenshot for debugging
-                await page.screenshot({ path: `error-${sessionId}.png` });
-                throw new Error('Video player not found');
+                throw new Error('Video player not found after all detection methods');
             }
 
             // Simulate human-like viewing behavior
@@ -184,6 +254,19 @@ class SessionRunner {
             return true;
         } catch (error) {
             console.error(`   ⚠️ Session error: ${error.message}`);
+            
+            // Save screenshot on error
+            try {
+                const screenshotPath = path.join(this.screenshotDir, `error-${sessionId}.png`);
+                await page.screenshot({ path: screenshotPath });
+                console.log(`   📸 Saved error screenshot to ${screenshotPath}`);
+                
+                // Upload to GitHub
+                await this.githubUploader.uploadScreenshot(screenshotPath, sessionId);
+            } catch (screenshotError) {
+                console.error('   ⚠️ Failed to save screenshot:', screenshotError.message);
+            }
+            
             return false;
         } finally {
             await browser.close();
@@ -191,61 +274,11 @@ class SessionRunner {
     }
 
     async handleAds(page) {
-        try {
-            // Handle consent dialog
-            await page.waitForSelector('button:has-text("Accept"), button:has-text("AGREE")', { timeout: 5000 });
-            await page.click('button:has-text("Accept"), button:has-text("AGREE")');
-            console.log('   ✅ Accepted consent dialog');
-        } catch {}
-
-        try {
-            // Skip video ads
-            await page.waitForSelector('.ytp-ad-skip-button', { timeout: 3000 });
-            await page.click('.ytp-ad-skip-button');
-            console.log('   ⏩ Skipped video ad');
-        } catch {}
-
-        try {
-            // Close banner ads
-            await page.waitForSelector('.ytp-ad-overlay-close-button', { timeout: 3000 });
-            await page.click('.ytp-ad-overlay-close-button');
-            console.log('   🚫 Closed banner ad');
-        } catch {}
+        // ... (keep existing handleAds implementation) ...
     }
 
     async simulateHumanBehavior(page) {
-        try {
-            // Random mouse movements
-            const viewport = page.viewport();
-            if (!viewport) return;
-            
-            const steps = Math.floor(Math.random() * 5) + 3;
-            for (let i = 0; i < steps; i++) {
-                const x = Math.random() * viewport.width;
-                const y = Math.random() * viewport.height;
-                await page.mouse.move(x, y, { steps: 10 });
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-            
-            // Random scrolling
-            const scrollAmount = Math.floor(Math.random() * 500) + 200;
-            await page.evaluate(scrollAmount => {
-                window.scrollBy(0, scrollAmount);
-            }, scrollAmount);
-            
-            // Random pauses
-            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 3000));
-            
-            // Random keyboard interactions
-            if (Math.random() > 0.7) {
-                await page.keyboard.press('Space');
-                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 4000));
-                await page.keyboard.press('Space');
-            }
-            
-        } catch (error) {
-            console.log('   ⚠️ Human behavior simulation error:', error.message);
-        }
+        // ... (keep existing simulateHumanBehavior implementation) ...
     }
 }
 
@@ -255,6 +288,7 @@ class SessionRunner {
         const proxyManager = new ProxyManager();
         const userAgentManager = new UserAgentManager();
         const videoManager = new VideoManager();
+        const githubUploader = new GitHubUploader();
         
         await Promise.all([
             proxyManager.initialize(),
@@ -270,7 +304,12 @@ class SessionRunner {
             console.log(`💡 Using ${proxyManager.workingProxies.length} verified proxies`);
         }
 
-        const sessionRunner = new SessionRunner(proxyManager, userAgentManager, videoManager);
+        const sessionRunner = new SessionRunner(
+            proxyManager, 
+            userAgentManager, 
+            videoManager,
+            githubUploader
+        );
         
         const SESSION_COUNT = 5;
         const results = [];
