@@ -1,555 +1,218 @@
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const axios = require('axios');
-const { HttpsProxyAgent } = require('https-proxy-agent');
-const net = require('net');
-const { setTimeout } = require('timers/promises');
-const fs = require('fs');
-const path = require('path');
+// ✅ CLEANED SCRIPT: Scraping removed, 2 main accounts enabled, GitHub + username.txt preserved
 
-puppeteer.use(StealthPlugin());
+const puppeteer = require("puppeteer");
+const axios = require("axios");
+const fs = require("fs");
+const dayjs = require("dayjs");
+const utc = require("dayjs/plugin/utc");
+const timezone = require("dayjs/plugin/timezone");
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
-// GitHub configuration
+// ------------------- CONFIG -------------------
+const MAIN_ACCOUNTS = [
+  { username: "follow_iamvirk5", password: "virksaab", sessionFile: "follow_iamvirk5.json" },
+  { username: "follow_iamvirk", password: "virksaab", sessionFile: "follow_iamvirk.json" }, // Optional second account
+];
+
+const OTP_URL = "https://raw.githubusercontent.com/virkx3/igbot/refs/heads/main/otp.txt";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPO = process.env.GITHUB_REPO; // Format: owner/repo
-const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
+const REPO = process.env.REPO;
+const BRANCH = process.env.BRANCH || "main";
+const USERNAMES = "usernames.txt";
 
-// Proxy sources
-const PROXY_SOURCES = [
-    'https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc',
-    'https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http',
-];
-
-const USER_AGENT_SOURCES = [
-    'https://raw.githubusercontent.com/tamimibrahim17/List-of-user-agents/master/Chrome.txt',
-    'https://gist.githubusercontent.com/pzb/b4b6f57144aea7827ae4/raw/cf847b76a142955b1410c8bcef3aabe221a63db1/user-agents.txt'
-];
-
-class ProxyManager {
-    constructor() {
-        this.proxies = [];
-        this.workingProxies = [];
-    }
-
-    async initialize() {
-        console.log('🔍 Fetching proxies...');
-        await this.refreshProxies();
-    }
-
-    async refreshProxies() {
-        try {
-            const results = await Promise.allSettled(
-                PROXY_SOURCES.map(url => this.fetchProxies(url))
-            );
-            
-            this.proxies = results.flatMap(result => 
-                result.status === 'fulfilled' ? result.value : []
-            );
-            
-            console.log(`💾 Loaded ${this.proxies.length} proxies`);
-        } catch (error) {
-            console.error('Failed to fetch proxies:', error.message);
-            this.proxies = [];
-        }
-    }
-
-    async fetchProxies(url) {
-        try {
-            if (url.includes('geonode')) {
-                const response = await axios.get(url, { timeout: 10000 });
-                return response.data.data.map(p => `${p.ip}:${p.port}`);
-            }
-            
-            const response = await axios.get(url, { timeout: 10000 });
-            return response.data.split(/\r?\n/)
-                .map(p => p.trim())
-                .filter(p => p && net.isIP(p.split(':')[0]) !== 0);
-        } catch {
-            return [];
-        }
-    }
-
-    async testProxyConnectivity(proxy) {
-        return new Promise(resolve => {
-            const [host, port] = proxy.split(':');
-            const socket = net.createConnection({
-                host: host,
-                port: parseInt(port),
-                timeout: 10000
-            });
-            
-            socket.on('connect', () => {
-                socket.end();
-                resolve(true);
-            });
-            
-            socket.on('timeout', () => {
-                socket.destroy();
-                resolve(false);
-            });
-            
-            socket.on('error', () => resolve(false));
-        });
-    }
-
-    async testProxyWithYouTube(proxy) {
-        try {
-            const agent = new HttpsProxyAgent(`http://${proxy}`);
-            await axios.get('https://www.youtube.com', {
-                timeout: 15000,
-                httpsAgent: agent,
-                headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                }
-            });
-            return true;
-        } catch (error) {
-            if (error.response && error.response.status === 403) {
-                return true;
-            }
-            return false;
-        }
-    }
-
-    async verifyProxy(proxy) {
-        const isAlive = await this.testProxyConnectivity(proxy);
-        if (!isAlive) return false;
-        return this.testProxyWithYouTube(proxy);
-    }
-
-    async findWorkingProxies(requiredCount = 3, maxTests = 1000) {
-        console.log('🧪 Verifying proxies...');
-        
-        const shuffledProxies = [...this.proxies].sort(() => 0.5 - Math.random());
-        let tested = 0;
-        let found = 0;
-        
-        for (const proxy of shuffledProxies) {
-            if (found >= requiredCount || tested >= maxTests) break;
-            
-            tested++;
-            const isValid = await this.verifyProxy(proxy);
-            
-            if (isValid) {
-                found++;
-                this.workingProxies.push(proxy);
-                console.log(`✅ Working proxy: ${proxy} (${found}/${requiredCount})`);
-            }
-            
-            if (tested % 50 === 0) {
-                console.log(`   Tested ${tested} proxies, found ${found} working`);
-            }
-        }
-        
-        console.log(`🔚 Tested ${tested} proxies, found ${found} working`);
-        return this.workingProxies;
-    }
-
-    getRandomProxy() {
-        if (this.workingProxies.length > 0) {
-            return this.workingProxies[Math.floor(Math.random() * this.workingProxies.length)];
-        }
-        return null;
-    }
+// ------------------- UTILS -------------------
+function delay(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+function randomDelay(min, max) {
+  return delay(Math.floor(Math.random() * (max - min + 1) + min));
 }
 
-class UserAgentManager {
-    constructor() {
-        this.userAgents = [];
-    }
-
-    async initialize() {
-        console.log('🔍 Fetching user agents...');
-        try {
-            const results = await Promise.allSettled(
-                USER_AGENT_SOURCES.map(url => this.fetchUserAgents(url))
-            );
-            
-            this.userAgents = results.flatMap(result => 
-                result.status === 'fulfilled' ? result.value : []
-            );
-            
-            console.log(`💾 Loaded ${this.userAgents.length} user agents`);
-        } catch (error) {
-            console.error('Failed to fetch user agents:', error.message);
-            this.userAgents = this.getDefaultUserAgents();
-        }
-    }
-
-    async fetchUserAgents(url) {
-        try {
-            const response = await axios.get(url, { timeout: 10000 });
-            return response.data.split(/\r?\n/)
-                .map(ua => ua.trim())
-                .filter(ua => ua.length > 0);
-        } catch {
-            return [];
-        }
-    }
-
-    getDefaultUserAgents() {
-        return [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
-        ];
-    }
-
-    getRandomUserAgent() {
-        if (this.userAgents.length > 0) {
-            return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
-        }
-        return this.getDefaultUserAgents()[0];
-    }
+async function fetchFromGitHub(file) {
+  try {
+    const res = await axios.get(
+      `https://raw.githubusercontent.com/${REPO}/${BRANCH}/data2/${file}`,
+      { headers: { Authorization: `Bearer ${GITHUB_TOKEN}` } }
+    );
+    console.log(`✅ Fetched ${file}`);
+    fs.writeFileSync(file, res.data);
+    return res.data;
+  } catch (err) {
+    console.log(`⚠️ Could not fetch ${file}: ${err.message}`);
+    return null;
+  }
 }
 
-class VideoManager {
-    constructor() {
-        this.videos = [];
-    }
+async function uploadToGitHub(remotePath, localPath) {
+  const url = `https://api.github.com/repos/${REPO}/contents/data2/${remotePath}`;
+  const headers = { Authorization: `Bearer ${GITHUB_TOKEN}` };
+  const content = fs.readFileSync(localPath);
 
-    async initialize() {
-        console.log('🔍 Fetching videos...');
-        try {
-            const response = await axios.get(
-                'https://raw.githubusercontent.com/virkx3/otp/main/youtube.txt',
-                { timeout: 10000 }
-            );
-            this.videos = response.data.split('\n')
-                .map(v => v.trim())
-                .filter(v => v.length > 0);
-            
-            if (this.videos.length === 0) {
-                this.videos = this.getDefaultVideos();
-            }
-        } catch {
-            this.videos = this.getDefaultVideos();
-        }
-        console.log(`💾 Loaded ${this.videos.length} videos`);
+  try {
+    const { data } = await axios.get(url, { headers });
+    await axios.put(
+      url,
+      {
+        message: `Update ${remotePath}`,
+        content: content.toString("base64"),
+        sha: data.sha,
+        branch: BRANCH,
+      },
+      { headers }
+    );
+    console.log(`✅ Uploaded (updated) ${remotePath}`);
+  } catch (err) {
+    if (err.response?.status === 404) {
+      await axios.put(
+        url,
+        {
+          message: `Create ${remotePath}`,
+          content: content.toString("base64"),
+          branch: BRANCH,
+        },
+        { headers }
+      );
+      console.log(`✅ Uploaded (created) ${remotePath}`);
+    } else {
+      console.log(`❌ Upload failed: ${err.message}`);
     }
-
-    getDefaultVideos() {
-        return [
-            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-            'https://www.youtube.com/watch?v=jNQXAC9IVRw',
-            'https://www.youtube.com/watch?v=9bZkp7q19f0'
-        ];
-    }
-
-    getRandomVideo() {
-        return this.videos[Math.floor(Math.random() * this.videos.length)];
-    }
+  }
 }
 
-class GitHubUploader {
-    constructor() {
-        if (!GITHUB_TOKEN || !GITHUB_REPO) {
-            console.warn('⚠️ GitHub credentials missing. Screenshots will be saved locally only.');
-            this.enabled = false;
-            return;
-        }
-        
-        this.enabled = true;
-        [this.repoOwner, this.repoName] = GITHUB_REPO.split('/');
-    }
+// ------------------- SESSION HANDLING -------------------
+async function loadSession(page, sessionFile) {
+  const raw = await fetchFromGitHub(sessionFile);
+  if (!raw) return false;
 
-    async uploadScreenshot(filePath, sessionId) {
-        if (!this.enabled) return null;
-        
-        try {
-            const fileName = `screenshot-${sessionId}-${Date.now()}.png`;
-            const fileContent = fs.readFileSync(filePath);
-            const contentBase64 = fileContent.toString('base64');
-            
-            const response = await axios.put(
-                `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/contents/screenshots/${fileName}`,
-                {
-                    message: `Add screenshot for session ${sessionId}`,
-                    content: contentBase64,
-                    branch: GITHUB_BRANCH
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'User-Agent': 'YouTube Viewer'
-                    }
-                }
-            );
-            
-            console.log(`   📸 Screenshot uploaded to GitHub: ${response.data.content.html_url}`);
-            return response.data.content.html_url;
-        } catch (error) {
-            console.error('   ⚠️ Failed to upload screenshot to GitHub:', error.message);
-            return null;
-        }
-    }
+  try {
+    const cookies = JSON.parse(typeof raw === "string" ? raw : JSON.stringify(raw));
+    if (!Array.isArray(cookies) || cookies.length === 0) return false;
+    await page.setCookie(...cookies);
+    console.log(`🔁 Loaded session: ${sessionFile}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-class SessionRunner {
-    constructor(proxyManager, userAgentManager, videoManager, githubUploader) {
-        this.proxyManager = proxyManager;
-        this.userAgentManager = userAgentManager;
-        this.videoManager = videoManager;
-        this.githubUploader = githubUploader;
-        this.screenshotDir = path.join(__dirname, 'screenshots');
-    }
-
-    async ensureScreenshotDir() {
-        if (!fs.existsSync(this.screenshotDir)) {
-            fs.mkdirSync(this.screenshotDir, { recursive: true });
-        }
-    }
-
-    async runSession(sessionId) {
-        const proxy = this.proxyManager.getRandomProxy();
-        const userAgent = this.userAgentManager.getRandomUserAgent();
-        const video = this.videoManager.getRandomVideo();
-
-        console.log(`\n🚀 Starting session #${sessionId}`);
-        console.log(`   Proxy: ${proxy || 'DIRECT CONNECTION'}`);
-        console.log(`   Video: ${video}`);
-        console.log(`   User Agent: ${userAgent.slice(0, 60)}...`);
-
-        const browserArgs = [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-software-rasterizer',
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-background-networking',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-breakpad',
-            '--disable-client-side-phishing-detection',
-            '--disable-component-update',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-hang-monitor',
-            '--disable-ipc-flooding-protection',
-            '--disable-popup-blocking',
-            '--disable-prompt-on-repost',
-            '--disable-renderer-backgrounding',
-            '--disable-sync',
-            '--disable-translate',
-            '--metrics-recording-only',
-            '--no-first-run',
-            '--safebrowsing-disable-auto-update',
-            '--mute-audio',
-            `--user-agent=${userAgent}`
-        ];
-
-        if (proxy) {
-            browserArgs.push(`--proxy-server=http://${proxy}`);
-        }
-
-        const browser = await puppeteer.launch({
-            headless: "new",
-            args: browserArgs,
-            ignoreHTTPSErrors: true
-        });
-
-        const page = await browser.newPage();
-        
-        try {
-            await this.ensureScreenshotDir();
-            
-            // Set random viewport
-            const width = Math.floor(Math.random() * (1920 - 1200)) + 1200;
-            const height = Math.floor(Math.random() * (1080 - 800)) + 800;
-            await page.setViewport({ width, height, deviceScaleFactor: 1 });
-
-            // Set stealth parameters
-            await page.evaluateOnNewDocument(() => {
-                delete navigator.__proto__.webdriver;
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5],
-                });
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en'],
-                });
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => Math.floor(Math.random() * 4) + 2,
-                });
-            });
-
-            // Block unnecessary resources
-            await page.setRequestInterception(true);
-            page.on('request', req => {
-                const resourceType = req.resourceType();
-                if (['image', 'media', 'font', 'stylesheet'].includes(resourceType)) {
-                    req.abort();
-                } else {
-                    req.continue();
-                }
-            });
-
-            console.log(`   🌐 Navigating to video...`);
-            await page.goto(video, {
-                waitUntil: 'networkidle2',
-                timeout: 90000
-            });
-
-            await this.handleAds(page);
-
-            // Enhanced video player detection
-            console.log(`   ⏳ Checking for video player...`);
-            let playerFound = false;
-            
-            try {
-                // Try to find video player using multiple methods
-                await page.waitForSelector('video', { timeout: 30000 });
-                playerFound = true;
-                console.log('   ✅ Found video element');
-            } catch (err) {
-                console.log('   ⚠️ Video element not found, trying fallback');
-            }
-            
-            if (!playerFound) {
-                try {
-                    await page.waitForFunction(() => {
-                        return document.querySelector('video') || 
-                               document.querySelector('.html5-video-player') ||
-                               document.querySelector('#player-container');
-                    }, { timeout: 30000 });
-                    playerFound = true;
-                    console.log('   ✅ Video player detected via JavaScript');
-                } catch (err) {
-                    console.log('   ⚠️ Could not detect video player with JavaScript');
-                }
-            }
-            
-            if (!playerFound) {
-                const screenshotPath = path.join(this.screenshotDir, `error-${sessionId}.png`);
-                await page.screenshot({ path: screenshotPath });
-                console.log(`   📸 Saved screenshot to ${screenshotPath}`);
-                
-                // Upload to GitHub
-                await this.githubUploader.uploadScreenshot(screenshotPath, sessionId);
-                
-                // Check for YouTube errors
-                const errorText = await page.evaluate(() => {
-                    return document.querySelector('#error-message')?.textContent.trim() || '';
-                });
-                
-                if (errorText) {
-                    throw new Error(`YouTube error: ${errorText}`);
-                }
-                
-                throw new Error('Video player not found after all detection methods');
-            }
-
-            // Simulate human-like viewing behavior
-            await this.simulateHumanBehavior(page);
-
-            const watchTime = Math.floor(Math.random() * (90000 - 30000)) + 30000;
-            console.log(`   ⏱️ Watching for ${Math.round(watchTime/1000)} seconds`);
-            
-            // Simulate activity during viewing
-            const startTime = Date.now();
-            while (Date.now() - startTime < watchTime) {
-                await this.simulateHumanBehavior(page);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-            }
-
-            console.log(`✅ Session #${sessionId} completed`);
-            return true;
-        } catch (error) {
-            console.error(`   ⚠️ Session error: ${error.message}`);
-            
-            // Save screenshot on error
-            try {
-                const screenshotPath = path.join(this.screenshotDir, `error-${sessionId}.png`);
-                await page.screenshot({ path: screenshotPath });
-                console.log(`   📸 Saved error screenshot to ${screenshotPath}`);
-                
-                // Upload to GitHub
-                await this.githubUploader.uploadScreenshot(screenshotPath, sessionId);
-            } catch (screenshotError) {
-                console.error('   ⚠️ Failed to save screenshot:', screenshotError.message);
-            }
-            
-            return false;
-        } finally {
-            await browser.close();
-        }
-    }
-
-    async handleAds(page) {
-        try {
-            // Handle consent dialog
-            await page.waitForSelector('button:has-text("Accept"), button:has-text("AGREE")', { timeout: 5000 });
-            await page.click('button:has-text("Accept"), button:has-text("AGREE")');
-            console.log('   ✅ Accepted consent dialog');
-        } catch {}
-
-        try {
-            // Skip video ads
-            await page.waitForSelector('.ytp-ad-skip-button', { timeout: 3000 });
-            await page.click('.ytp-ad-skip-button');
-            console.log('   ⏩ Skipped video ad');
-        } catch {}
-
-        try {
-            // Close banner ads
-            await page.waitForSelector('.ytp-ad-overlay-close-button', { timeout: 3000 });
-            await page.click('.ytp-ad-overlay-close-button');
-            console.log('   🚫 Closed banner ad');
-        } catch {}
-    }
-
-    async simulateHumanBehavior(page) {
-        try {
-            // Random mouse movements
-            const viewport = page.viewport();
-            const steps = Math.floor(Math.random() * 5) + 3;
-            for (let i = 0; i < steps; i++) {
-                const x = Math.random() * viewport.width;
-                const y = Math.random() * viewport.height;
-                await page.mouse.move(x, y, { steps: 10 });
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-            
-            // Random scrolling
-            const scrollAmount = Math.floor(Math.random() * 500) + 200;
-            await page.evaluate(scrollAmount => {
-                window.scrollBy(0, scrollAmount);
-            }, scrollAmount);
-            
-            // Random pauses
-            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 3000));
-            
-            // Random keyboard interactions
-            if (Math.random() > 0.7) {
-                await page.keyboard.press('Space');
-                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 4000));
-                await page.keyboard.press('Space');
-            }
-            
-        } catch (error) {
-            console.log('   ⚠️ Human behavior simulation error:', error.message);
-        }
-    }
+async function saveSession(page, sessionFile) {
+  const cookies = await page.cookies();
+  const valid = cookies.find((c) => c.name === "sessionid");
+  if (valid) {
+    fs.writeFileSync(sessionFile, JSON.stringify(cookies, null, 2));
+    console.log(`✅ Saved local: ${sessionFile}`);
+    await uploadToGitHub(sessionFile, sessionFile);
+    return true;
+  }
+  return false;
 }
 
-// Main execution
+// ------------------- LOGIN -------------------
+async function fetchOTP() {
+  try {
+    const res = await axios.get(OTP_URL);
+    const otp = res.data.trim();
+    return otp.length >= 4 && otp.length <= 8 ? otp : null;
+  } catch {
+    return null;
+  }
+}
+
+async function login(page, account) {
+  console.log(`🔐 Logging in: @${account.username}`);
+  await page.goto("https://www.instagram.com/accounts/login/", { waitUntil: "networkidle2" });
+  await page.waitForSelector('input[name="username"]', { timeout: 15000 });
+  await page.type('input[name="username"]', account.username, { delay: 100 });
+  await page.type('input[name="password"]', account.password, { delay: 100 });
+  await page.click('button[type="submit"]');
+  await delay(8000);
+
+  const otpInput = await page.$('input[name="verificationCode"]');
+  if (otpInput) {
+    console.log("🔐 Waiting OTP...");
+    for (let i = 0; i < 60; i++) {
+      const otp = await fetchOTP();
+      if (otp) {
+        console.log(`📩 OTP: ${otp}`);
+        await page.type('input[name="verificationCode"]', otp, { delay: 100 });
+        await page.click("button[type=button]");
+        break;
+      }
+      await delay(1000);
+    }
+  }
+
+  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {});
+  await saveSession(page, account.sessionFile);
+  console.log(`✅ Logged in: @${account.username}`);
+}
+
+// ------------------- STORY VIEW + LIKE -------------------
+async function watchAndLikeStory(page, username) {
+  const url = `https://www.instagram.com/stories/${username}/`;
+  console.log(`👀 Visiting stories: ${url}`);
+  await page.goto(url, { waitUntil: "networkidle2" });
+  await randomDelay(3000, 5000);
+
+  const likeBtn = await page.$('svg[aria-label="Like"]');
+  if (likeBtn) {
+    const box = await likeBtn.boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      console.log(`❤️ Liked story of @${username}`);
+    }
+  } else {
+    console.log(`💨 No like button found`);
+  }
+
+  await randomDelay(3000, 6000);
+}
+
+function isSleepTime() {
+  const now = dayjs().tz("Asia/Kolkata");
+  const h = now.hour();
+  return h >= 22 || h < 10;
+}
+
+// ------------------- MAIN FLOW -------------------
+async function runMainAccount(account) {
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1200, height: 800 });
+  await page.setUserAgent("Mozilla/5.0");
+
+  const hasSession = await loadSession(page, account.sessionFile);
+  if (!hasSession) await login(page, account);
+
+  await fetchFromGitHub(USERNAMES);
+  const local = fs.readFileSync(USERNAMES, "utf8");
+  const usernames = local.split("\n").map(l => l.trim()).filter(Boolean);
+
+  for (const username of usernames) {
+    await watchAndLikeStory(page, username);
+    await randomDelay(4000, 8000);
+  }
+
+  await browser.close();
+}
+
+// ------------------- MAIN LOOP -------------------
 (async () => {
-    try {
-        const proxyManager = new ProxyManager();
-        const userAgentManager = new UserAgentManager();
-        const videoManager = new VideoManager();
-        const githubUploader = new GitHubUploader();
-        
-        // Initialize all managers
-        await proxyManager.initialize();
-        await userAgentManager.initialize();
-        await videoManager.initialize();
+  while (true) {
+    if (isSleepTime()) {
+      console.log("🌙 Sleeping 30 min");
+      await delay(30 * 60 * 1000);
+      continue;
+    }
 
-        // Find working proxies
-        await proxyManager.findWorkingProxies();
-        
-        if (proxyManager.workingProxies.length === 0) {
-            console.warn('⚠️ No working proxies found. Using direct connection');
+    for (const account of MAIN_ACCOUNTS) {
+      await runMainAccount(account);
+      await delay(2 * 60 * 1000);
+    }
+
+    console.log("🔄 Cycle complete. Restarting soon...");
+    await delay(60 * 1000);
+  }
+})();
