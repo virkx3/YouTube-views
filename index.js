@@ -292,9 +292,9 @@ async function runMainAccount(account) {
       continue;
     }
 
-    for (const account of MAIN_ACCOUNTS) {
-      await runMainAccount(account);
-      const breakMs = Math.floor(Math.random() * (5 - 4 + 1) + 4) * 60 * 1000;
+    await Promise.all(MAIN_ACCOUNTS.map(runMainAccount));
+
+const breakMs = Math.floor(Math.random() * (5 - 2 + 1) + 2) * 60 * 1000;
 console.log(`⏸️ Waiting ${Math.round(breakMs / 60000)} minutes before next cycle...`);
 await delay(breakMs);
     }
