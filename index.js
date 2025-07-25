@@ -36,7 +36,7 @@ async function fetchFromGitHub(file) {
       { headers: { Authorization: `Bearer ${GITHUB_TOKEN}` } }
     );
     console.log(`✅ Fetched ${file}`);
-    fs.writeFileSync(file, res.data);
+    fs.writeFileSync(file, typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2));
     return res.data;
   } catch (err) {
     console.log(`⚠️ Could not fetch ${file}: ${err.message}`);
