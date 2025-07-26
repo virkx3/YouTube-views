@@ -215,23 +215,26 @@ async function watchAndLikeStory(page, username) {
   }
 
   if (!opened) {
-    for (let i = 1; i <= 25; i++) {
-      const x = 600 + Math.floor(Math.random() * 50 - 25);
-      const y = 450 + Math.floor(Math.random() * 50 - 25);
-      await moveCursor(x, y);
-      await page.mouse.click(x, y);
-      await delay(100);
+  for (let i = 1; i <= 25; i++) {
+    const x = 600 + Math.floor(Math.random() * 50 - 25);
+    const y = 450 + Math.floor(Math.random() * 50 - 25);
 
-      const like = await page.$('svg[aria-label="Like"]');
-      const close = await page.$('button[aria-label="Close"]');
+    await moveCursor(x, y);
+    await page.mouse.click(x, y);
+    console.log(`🖱️ Fallback click try ${i} at X:${x} Y:${y}`);
 
-      if (like || close) {
-        opened = true;
-        console.log(`✅ Fallback click worked on try ${i} — story opened!`);
-        break;
-      }
+    await delay(100);
+
+    const like = await page.$('svg[aria-label="Like"]');
+    const close = await page.$('button[aria-label="Close"]');
+
+    if (like || close) {
+      opened = true;
+      console.log(`✅ Fallback click worked on try ${i} — story opened at X:${x} Y:${y}`);
+      break;
     }
   }
+}
 
   if (!opened) {
     console.log(`❌ No story found for @${username} (fallback failed)`);
