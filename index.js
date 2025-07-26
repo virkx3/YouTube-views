@@ -159,33 +159,18 @@ async function login(page, account) {
 
 // ------------------- STORY VIEW + LIKE -------------------
 async function watchAndLikeStory(page, username) {
-  if (!page || page.isClosed()) {
-    console.log(`❌ Page is undefined or closed at start → skip @${username}`);
-    return false;
-  }
-  if (typeof page.$x !== "function") {
-    console.log(`❌ page.$x is not a function → Puppeteer context broken`);
-    return false;
-  }
-
   const url = `https://www.instagram.com/stories/${username}/`;
   console.log(`👀 Visiting stories: ${url}`);
 
   try {
-    await page.goto(url, { waitUntil: "networkidle2" });
-  } catch (err) {
-    console.log(`❌ Failed to load story page → ${err.message}`);
-    return false;
-  }
-
-  if (page.isClosed()) {
-    console.log(`❌ Page closed after goto → skip @${username}`);
-    return false;
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+  } catch {
+    console.log(`⚠️ Could not load ${url} — skipping`);
+    return true;
   }
 
   await randomDelay(3000, 5000);
 
-  // Add fake cursor
   await page.evaluate(() => {
     if (document.getElementById("fake-cursor")) return;
     const cursor = document.createElement("div");
@@ -214,49 +199,47 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  if (!page.$x) {
-    console.log(`❌ page.$x still missing → skip`);
-    return false;
+  // SAFE: $x wrapped in try-catch
+  let btn = null;
+  try {
+    [btn] = await page.$x("//button[contains(., 'View story')]");
+  } catch {
+    console.log(`⚠️ page.$x failed — fallback mode`);
   }
 
-  const [btn] = await page.$x("//button[contains(., 'View story')]");
   if (btn) {
-    console.log(`✅ Found "View Story" button`);
-    try {
-      await moveCursor(600, 400);
-      await btn.click();
-      opened = true;
-    } catch {
-      console.log(`⚠️ .click() failed → trying fallback`);
-      const box = await btn.boundingBox();
-      if (box) {
-        const fallbackX = box.x + box.width / 2;
-        const fallbackY = box.y + box.height / 2;
-        await moveCursor(fallbackX, fallbackY);
-        await page.mouse.click(fallbackX, fallbackY);
-        console.log(`✅ Fallback bounding box click`);
-        opened = true;
-      } else {
-        console.log(`❌ No bounding box for fallback`);
-      }
-    }
-  } else {
-    console.log(`❌ No "View Story" button → user has no story`);
-    return false;
+    await moveCursor(600, 400);
+    await btn.click();
+    console.log(`✅ Clicked "View Story" button`);
+    opened = true;
   }
 
   if (!opened) {
-    console.log(`❌ Story not opened → skip`);
-    return false;
+    for (let i = 1; i <= 25; i++) {
+      const x = 600 + Math.floor(Math.random() * 50 - 25);
+      const y = 450 + Math.floor(Math.random() * 50 - 25);
+      await moveCursor(x, y);
+      await page.mouse.click(x, y);
+      await delay(100);
+
+      const like = await page.$('svg[aria-label="Like"]');
+      const close = await page.$('button[aria-label="Close"]');
+
+      if (like || close) {
+        opened = true;
+        console.log(`✅ Fallback click worked on try ${i} — story opened!`);
+        break;
+      }
+    }
+  }
+
+  if (!opened) {
+    console.log(`❌ No story found for @${username} (fallback failed)`);
+    return true;
   }
 
   const maxStories = 1 + Math.floor(Math.random() * 2);
   for (let i = 0; i < maxStories; i++) {
-    if (page.isClosed()) {
-      console.log(`❌ Page closed while watching → break`);
-      break;
-    }
-
     let liked = false;
     const likeBtn = await page.$('svg[aria-label="Like"]');
     if (likeBtn) {
