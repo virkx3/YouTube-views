@@ -258,7 +258,7 @@ async function watchAndLikeStory(page, username) {
 function isSleepTime() {
   const now = dayjs().tz("Asia/Kolkata");
   const h = now.hour();
-  return h >= 22 || h < 10;
+  return h >= 22 || h < 08;
 }
 
 // ------------------- MAIN FLOW -------------------
