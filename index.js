@@ -152,7 +152,7 @@ async function login(page, account) {
     }
   }
 
-  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {});
+  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
   await saveSession(page, account.sessionFile);
   console.log(`✅ Logged in: @${account.username}`);
 }
@@ -161,7 +161,7 @@ async function login(page, account) {
 async function watchAndLikeStory(page, username) {
   const url = `https://www.instagram.com/stories/${username}/`;
   console.log(`👀 Visiting stories: ${url}`);
-  await page.goto(url, { waitUntil: "networkidle2" });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   await randomDelay(3000, 5000);
 
   await page.evaluate(() => {
@@ -276,23 +276,35 @@ async function runMainAccount(account) {
   if (!hasSession) await login(page, account);
 
   async function fetchUsernamesFromPrivateRepo() {
-    const url = `https://api.github.com/repos/${REPO}/contents/data2/${USERNAMES}`;
-    const headers = {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
-      Accept: "application/vnd.github.v3.raw"
-    };
+  const url = `https://api.github.com/repos/${REPO}/contents/data2/${USERNAMES}`;
+  const headers = {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: "application/vnd.github.v3.raw"
+  };
 
-    try {
-      const res = await axios.get(url, { headers });
-      const lines = res.data.split("\n").map(line => line.trim()).filter(Boolean);
-      console.log(`📥 Loaded ${lines.length} usernames from private repo`);
-      return lines.slice(0, 20);
-    } catch (err) {
-      console.log(`❌ Failed to fetch usernames from GitHub API: ${err.message}`);
+  try {
+    const res = await axios.get(url, { headers });
+    let lines = res.data.split("\n").map(line => line.trim()).filter(Boolean);
+    const top20 = lines.splice(0, 20);
+
+    if (top20.length === 0) {
+      console.log(`⚠️ No usernames left to process.`);
       return [];
     }
-  }
 
+    // Overwrite local usernames.txt with remaining
+    fs.writeFileSync(USERNAMES, lines.join("\n"));
+
+    // Upload updated usernames.txt back to GitHub
+    await uploadToGitHub(USERNAMES, USERNAMES);
+
+    console.log(`📥 Grabbed top ${top20.length}, ${lines.length} left.`);
+    return top20;
+  } catch (err) {
+    console.log(`❌ Failed to fetch usernames: ${err.message}`);
+    return [];
+  }
+}
   // ✅ FIXED HERE: fetch usernames before use
   const usernames = await fetchUsernamesFromPrivateRepo();
   if (!usernames.length) {
