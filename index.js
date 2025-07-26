@@ -1,3 +1,5 @@
+// ✅ CLEANED SCRIPT: Scraping removed, 2 main accounts enabled, GitHub + username.txt preserved
+
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const fs = require("fs");
@@ -10,7 +12,7 @@ dayjs.extend(timezone);
 // ------------------- CONFIG -------------------
 const MAIN_ACCOUNTS = [
   { username: "follow_iamvirk5", password: "virksaab", sessionFile: "follow_iamvirk5.json" },
-  { username: "follow_iamvirk", password: "virksaab", sessionFile: "follow_iamvirk.json" }
+  { username: "follow_iamvirk", password: "virksaab", sessionFile: "follow_iamvirk.json" }, // Optional second account
 ];
 
 const OTP_URL = "https://raw.githubusercontent.com/virkx3/igbot/refs/heads/main/otp.txt";
@@ -25,15 +27,6 @@ function delay(ms) {
 }
 function randomDelay(min, max) {
   return delay(Math.floor(Math.random() * (max - min + 1) + min));
-}
-
-async function safeSelector(page, selector, timeout = 5000) {
-  try {
-    await page.waitForSelector(selector, { timeout });
-    return await page.$(selector);
-  } catch {
-    return null;
-  }
 }
 
 async function fetchFromGitHub(file) {
@@ -58,20 +51,28 @@ async function uploadToGitHub(remotePath, localPath) {
 
   try {
     const { data } = await axios.get(url, { headers });
-    await axios.put(url, {
-      message: `Update ${remotePath}`,
-      content: content.toString("base64"),
-      sha: data.sha,
-      branch: BRANCH,
-    }, { headers });
+    await axios.put(
+      url,
+      {
+        message: `Update ${remotePath}`,
+        content: content.toString("base64"),
+        sha: data.sha,
+        branch: BRANCH,
+      },
+      { headers }
+    );
     console.log(`✅ Uploaded (updated) ${remotePath}`);
   } catch (err) {
     if (err.response?.status === 404) {
-      await axios.put(url, {
-        message: `Create ${remotePath}`,
-        content: content.toString("base64"),
-        branch: BRANCH,
-      }, { headers });
+      await axios.put(
+        url,
+        {
+          message: `Create ${remotePath}`,
+          content: content.toString("base64"),
+          branch: BRANCH,
+        },
+        { headers }
+      );
       console.log(`✅ Uploaded (created) ${remotePath}`);
     } else {
       console.log(`❌ Upload failed: ${err.message}`);
@@ -149,94 +150,120 @@ async function login(page, account) {
 
 // ------------------- STORY VIEW + LIKE -------------------
 async function watchAndLikeStory(page, username) {
+  const url = `https://www.instagram.com/stories/${username}/`;
+  console.log(`👀 Visiting stories: ${url}`);
+  await page.goto(url, { waitUntil: "networkidle2" });
+  await randomDelay(3000, 5000);
+
+  // Inject fake cursor
+  await page.evaluate(() => {
+    if (document.getElementById("fake-cursor")) return;
+    const cursor = document.createElement("div");
+    cursor.id = "fake-cursor";
+    cursor.style.position = "fixed";
+    cursor.style.width = "20px";
+    cursor.style.height = "20px";
+    cursor.style.border = "2px solid red";
+    cursor.style.borderRadius = "50%";
+    cursor.style.zIndex = "9999";
+    cursor.style.pointerEvents = "none";
+    cursor.style.transition = "top 0.05s, left 0.05s";
+    document.body.appendChild(cursor);
+  });
+
+  const moveCursor = async (x, y) => {
+    await page.evaluate((x, y) => {
+      const c = document.getElementById('fake-cursor');
+      if (c) {
+        c.style.left = `${x}px`;
+        c.style.top = `${y}px`;
+      }
+    }, x, y);
+    await page.mouse.move(x, y);
+  };
+
+  let opened = false;
+
+  // Try normal 'View story' button
   try {
-    const url = `https://www.instagram.com/stories/${username}/`;
-    console.log(`👀 Visiting stories: ${url}`);
-    await page.goto(url, { waitUntil: "networkidle2" });
-    await randomDelay(3000, 5000);
-
-    let opened = false;
-
     const [btn] = await page.$x("//button[contains(., 'View story')]");
     if (btn) {
+      await moveCursor(600, 400);
       await btn.click();
       console.log("✅ Clicked 'View Story'");
       opened = true;
     }
+  } catch {}
 
-    if (!opened) {
-      for (let i = 1; i <= 25; i++) {
-        const x = 600 + Math.floor(Math.random() * 50 - 25);
-        const y = 450 + Math.floor(Math.random() * 50 - 25);
-        await page.mouse.move(x, y);
-        await page.mouse.click(x, y);
-        await delay(1500);
+  // Fallback clicks if story not opened
+  if (!opened) {
+    for (let i = 1; i <= 25; i++) {
+      const x = 600 + Math.floor(Math.random() * 50 - 25);
+      const y = 450 + Math.floor(Math.random() * 50 - 25);
+      await moveCursor(x, y);
+      await page.mouse.click(x, y);
+      await delay(1500);
 
-        const like = await safeSelector(page, 'svg[aria-label="Like"]', 2000);
-        const close = await safeSelector(page, 'button[aria-label="Close"]', 2000);
-        if (like || close) {
-          opened = true;
-          console.log(`✅ Fallback click worked on try ${i} — story opened!`);
-          break;
-        }
-      }
-    }
-
-    if (!opened) {
-      console.log(`❌ No story found for @${username} (fallback failed)`);
-      return true;
-    }
-
-    const maxStories = 1 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < maxStories; i++) {
-      const likeBtn = await safeSelector(page, 'svg[aria-label="Like"]', 2000);
-      if (likeBtn) {
-        const box = await likeBtn.boundingBox();
-        if (box) {
-          const x = box.x + box.width / 2;
-          const y = box.y + box.height / 2;
-          await page.mouse.move(x, y);
-          await page.mouse.click(x, y);
-          console.log("❤️ Liked story");
-        }
-      } else {
-        console.log("💨 No like button found");
-      }
-
-      const nextBtn = await safeSelector(page, 'button[aria-label="Next"]', 3000);
-      if (nextBtn) {
-        await nextBtn.click();
-        console.log("➡️ Next story");
-        await randomDelay(1500, 3000);
-      } else {
-        console.log("⏹️ No more stories");
+      const like = await page.$('svg[aria-label="Like"]');
+      const close = await page.$('button[aria-label="Close"]');
+      if (like || close) {
+        opened = true;
+        console.log(`✅ Fallback click worked on try ${i} — story opened!`);
         break;
       }
     }
-
-    await randomDelay(2000, 4000);
-    return true;
-
-  } catch (err) {
-    console.log(`❌ Error watching @${username}:`, err.message);
-    return false;
   }
+
+  if (!opened) {
+    console.log(`❌ No story found for @${username} (fallback failed)`);
+    return true; // still mark it as handled
+  }
+
+  // Story open — like 1–2 stories
+  const maxStories = 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < maxStories; i++) {
+    let liked = false;
+    const likeBtn = await page.$('svg[aria-label="Like"]');
+    if (likeBtn) {
+      const box = await likeBtn.boundingBox();
+      if (box) {
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await moveCursor(x, y);
+        await page.mouse.click(x, y);
+        liked = true;
+        console.log("❤️ Liked story");
+      }
+    }
+
+    if (!liked) {
+      console.log("💨 No like button found");
+    }
+
+    const nextBtn = await page.$('button[aria-label="Next"]');
+    if (nextBtn) {
+      await nextBtn.click();
+      console.log("➡️ Next story");
+      await randomDelay(1500, 3000);
+    } else {
+      console.log("⏹️ No more stories");
+      break;
+    }
+  }
+
+  await randomDelay(2000, 4000);
+  return true;
 }
 
 function isSleepTime() {
   const now = dayjs().tz("Asia/Kolkata");
   const h = now.hour();
-  return h >= 22 || h < 8;
+  return h >= 22 || h < 08;
 }
 
 // ------------------- MAIN FLOW -------------------
 async function runMainAccount(account) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox"],
-    protocolTimeout: 60000,
-  });
-
+  const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1200, height: 800 });
   await page.setUserAgent("Mozilla/5.0");
@@ -249,12 +276,7 @@ async function runMainAccount(account) {
   const usernames = local.split("\n").map(l => l.trim()).filter(Boolean);
 
   for (const username of usernames) {
-    try {
-      console.log(`🚀 Processing @${username}`);
-      await watchAndLikeStory(page, username);
-    } catch (err) {
-      console.log(`❌ Error for @${username}: ${err.message}`);
-    }
+    await watchAndLikeStory(page, username);
     await randomDelay(4000, 8000);
   }
 
