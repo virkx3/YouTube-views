@@ -114,6 +114,7 @@ async function watchAndLikeStory(page, username) {
   const url = `https://www.instagram.com/stories/${username}/`;
   console.log(`👀 Visiting stories: ${url}`);
 
+  // Load stories page
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
   } catch {
@@ -121,13 +122,18 @@ async function watchAndLikeStory(page, username) {
     return true;
   }
 
+  // ✅ Wait 2–3 sec for possible redirect to profile
+  await delay(2000);
+
   const currentUrl = page.url();
   if (!currentUrl.includes("/stories/")) {
-    console.log(`❌ No story — redirected to profile`);
-    return true;
+    console.log(`❌ No story — redirected to profile, skip fallback clicks`);
+    return true; // ⏩ Skip to next user
   }
 
-  await randomDelay(2000, 4000);
+  console.log(`✅ Story confirmed — safe to fallback click`);
+
+  // Continue with fallback clicks...
 
   await page.evaluate(() => {
     if (document.getElementById("fake-cursor")) return;
@@ -157,37 +163,19 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  try {
-    const [btn] = await page.$x("//button[contains(., 'View story')]");
-    if (btn) {
-      await moveCursor(600, 400);
-      await btn.click();
-      console.log(`✅ Clicked "View Story"`);
+  for (let i = 1; i <= 20; i++) {
+    const x = 595 + Math.floor(Math.random() * 30);
+    const y = 455 + Math.floor(Math.random() * 20);
+    await moveCursor(x, y);
+    await page.mouse.click(x, y);
+    await delay(100);
+
+    const like = await page.$('svg[aria-label="Like"]');
+    const close = await page.$('button[aria-label="Close"]');
+    if (like || close) {
       opened = true;
-    }
-  } catch {}
-
-  if (!opened) {
-    for (let i = 1; i <= 20; i++) {
-      const x = 595 + Math.floor(Math.random() * 30);
-      const y = 455 + Math.floor(Math.random() * 20);
-      await moveCursor(x, y);
-      await page.mouse.click(x, y);
-      await delay(200);
-
-      const newUrl = page.url();
-      if (!newUrl.includes("/stories/")) {
-        console.log(`❌ Fallback click landed on profile — no story`);
-        return true;
-      }
-
-      const like = await page.$('svg[aria-label="Like"]');
-      const close = await page.$('button[aria-label="Close"]');
-      if (like || close) {
-        opened = true;
-        console.log(`✅ Fallback click worked on try ${i}`);
-        break;
-      }
+      console.log(`✅ Fallback click worked on try ${i}`);
+      break;
     }
   }
 
