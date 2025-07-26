@@ -254,10 +254,11 @@ async function watchAndLikeStory(page, username) {
       break;
     }
   }
-  
+
   await randomDelay(1000, 3000);
   return true;
 }
+
 function isSleepTime() {
   const now = dayjs().tz("Asia/Kolkata");
   const h = now.hour();
