@@ -219,8 +219,8 @@ async function watchAndLikeStory(page, username) {
     return true; // still mark it as handled
   }
 
-  // Story open — like 1–2 stories
-  const maxStories = 1 + Math.floor(Math.random() * 2);
+  // Story open — like 1 story
+  const maxStories = 1 + Math.floor(Math.random() * 1);
   for (let i = 0; i < maxStories; i++) {
     let liked = false;
     const likeBtn = await page.$('svg[aria-label="Like"]');
