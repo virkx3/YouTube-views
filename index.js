@@ -268,16 +268,29 @@ async function runMainAccount(account) {
   const hasSession = await loadSession(page, account.sessionFile);
   if (!hasSession) await login(page, account);
 
-  const USERNAMES_URL = "https://raw.githubusercontent.com/virkx3/igbot/refs/heads/main/data2/usernames.txt?token=GHSAT0AAAAAADGDFEXE737RX62DANNDSARU2EEPXMQ";
+  async function fetchUsernamesFromPrivateRepo() {
+    const url = `https://api.github.com/repos/${REPO}/contents/data2/${USERNAMES}`;
+    const headers = {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Accept: "application/vnd.github.v3.raw"
+    };
 
-  let usernames = [];
-  try {
-    const res = await axios.get(USERNAMES_URL);
-    const allUsernames = res.data.split("\n").map(l => l.trim()).filter(Boolean);
-    usernames = allUsernames.slice(0, 20);
-    console.log(`📥 Loaded ${usernames.length} usernames from GitHub`);
-  } catch (err) {
-    console.log(`❌ Failed to fetch usernames: ${err.message}`);
+    try {
+      const res = await axios.get(url, { headers });
+      const lines = res.data.split("\n").map(line => line.trim()).filter(Boolean);
+      console.log(`📥 Loaded ${lines.length} usernames from private repo`);
+      return lines.slice(0, 20);
+    } catch (err) {
+      console.log(`❌ Failed to fetch usernames from GitHub API: ${err.message}`);
+      return [];
+    }
+  }
+
+  // ✅ FIXED HERE: fetch usernames before use
+  const usernames = await fetchUsernamesFromPrivateRepo();
+  if (!usernames.length) {
+    console.log("⚠️ No usernames to process");
+    await browser.close();
     return;
   }
 
