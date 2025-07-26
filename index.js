@@ -162,6 +162,7 @@ async function watchAndLikeStory(page, username) {
   const url = `https://www.instagram.com/stories/${username}/`;
   console.log(`👀 Visiting stories: ${url}`);
 
+  // Go to story link
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
   } catch {
@@ -169,8 +170,16 @@ async function watchAndLikeStory(page, username) {
     return true;
   }
 
-  await randomDelay(3000, 5000);
+  // Check if redirected to profile → means no story
+  const currentUrl = page.url();
+  if (currentUrl.includes("/stories/") === false) {
+    console.log(`❌ No story — redirected to profile`);
+    return true;
+  }
 
+  await randomDelay(2000, 4000);
+
+  // Add fake cursor
   await page.evaluate(() => {
     if (document.getElementById("fake-cursor")) return;
     const cursor = document.createElement("div");
@@ -199,48 +208,42 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  // SAFE: $x wrapped in try-catch
-  let btn = null;
+  // Try official button first
   try {
-    [btn] = await page.$x("//button[contains(., 'View story')]");
-  } catch {
-    console.log(`⚠️ page.$x failed — fallback mode`);
-  }
-
-  if (btn) {
-    await moveCursor(600, 400);
-    await btn.click();
-    console.log(`✅ Clicked "View Story" button`);
-    opened = true;
-  }
-
-  if (!opened) {
-  for (let i = 1; i <= 25; i++) {
-    const x = 600 + Math.floor(Math.random() * 50 - 25);
-    const y = 450 + Math.floor(Math.random() * 50 - 25);
-
-    await moveCursor(x, y);
-    await page.mouse.click(x, y);
-    console.log(`🖱️ Fallback click try ${i} at X:${x} Y:${y}`);
-
-    await delay(100);
-
-    const like = await page.$('svg[aria-label="Like"]');
-    const close = await page.$('button[aria-label="Close"]');
-
-    if (like || close) {
+    const [btn] = await page.$x("//button[contains(., 'View story')]");
+    if (btn) {
+      await moveCursor(600, 400);
+      await btn.click();
+      console.log(`✅ Clicked "View Story"`);
       opened = true;
-      console.log(`✅ Fallback click worked on try ${i} — story opened at X:${x} Y:${y}`);
-      break;
+    }
+  } catch {}
+
+  // If not opened → fallback in tight zone
+  if (!opened) {
+    for (let i = 1; i <= 20; i++) {
+      const x = 595 + Math.floor(Math.random() * 30); // X: 595–625
+      const y = 455 + Math.floor(Math.random() * 20); // Y: 455–475
+      await moveCursor(x, y);
+      await page.mouse.click(x, y);
+      await delay(100);
+
+      const like = await page.$('svg[aria-label="Like"]');
+      const close = await page.$('button[aria-label="Close"]');
+      if (like || close) {
+        opened = true;
+        console.log(`✅ Fallback click worked on try ${i}`);
+        break;
+      }
     }
   }
-}
 
   if (!opened) {
-    console.log(`❌ No story found for @${username} (fallback failed)`);
+    console.log(`❌ No story opened for @${username}`);
     return true;
   }
 
+  // Watch & like stories
   const maxStories = 1 + Math.floor(Math.random() * 2);
   for (let i = 0; i < maxStories; i++) {
     let liked = false;
