@@ -1,5 +1,3 @@
-// ✅ CLEANED SCRIPT: Scraping removed, 2 main accounts enabled, GitHub + username.txt preserved
-
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const fs = require("fs");
@@ -12,7 +10,7 @@ dayjs.extend(timezone);
 // ------------------- CONFIG -------------------
 const MAIN_ACCOUNTS = [
   { username: "follow_iamvirk5", password: "virksaab", sessionFile: "follow_iamvirk5.json" },
-  { username: "follow_iamvirk", password: "virksaab", sessionFile: "follow_iamvirk.json" }, // Optional second account
+  { username: "follow_iamvirk", password: "virksaab", sessionFile: "follow_iamvirk.json" },
 ];
 
 const OTP_URL = "https://raw.githubusercontent.com/virkx3/igbot/refs/heads/main/otp.txt";
@@ -29,15 +27,6 @@ function randomDelay(min, max) {
   return delay(Math.floor(Math.random() * (max - min + 1) + min));
 }
 
-async function safeSelector(page, selector, timeout = 5000) {
-  try {
-    await page.waitForSelector(selector, { timeout });
-    return await page.$(selector);
-  } catch {
-    return null;
-  }
-}
-
 async function fetchFromGitHub(file) {
   try {
     const res = await axios.get(
@@ -50,42 +39,6 @@ async function fetchFromGitHub(file) {
   } catch (err) {
     console.log(`⚠️ Could not fetch ${file}: ${err.message}`);
     return null;
-  }
-}
-
-async function uploadToGitHub(remotePath, localPath) {
-  const url = `https://api.github.com/repos/${REPO}/contents/data2/${remotePath}`;
-  const headers = { Authorization: `Bearer ${GITHUB_TOKEN}` };
-  const content = fs.readFileSync(localPath);
-
-  try {
-    const { data } = await axios.get(url, { headers });
-    await axios.put(
-      url,
-      {
-        message: `Update ${remotePath}`,
-        content: content.toString("base64"),
-        sha: data.sha,
-        branch: BRANCH,
-      },
-      { headers }
-    );
-    console.log(`✅ Uploaded (updated) ${remotePath}`);
-  } catch (err) {
-    if (err.response?.status === 404) {
-      await axios.put(
-        url,
-        {
-          message: `Create ${remotePath}`,
-          content: content.toString("base64"),
-          branch: BRANCH,
-        },
-        { headers }
-      );
-      console.log(`✅ Uploaded (created) ${remotePath}`);
-    } else {
-      console.log(`❌ Upload failed: ${err.message}`);
-    }
   }
 }
 
@@ -111,7 +64,6 @@ async function saveSession(page, sessionFile) {
   if (valid) {
     fs.writeFileSync(sessionFile, JSON.stringify(cookies, null, 2));
     console.log(`✅ Saved local: ${sessionFile}`);
-    await uploadToGitHub(sessionFile, sessionFile);
     return true;
   }
   return false;
@@ -162,7 +114,6 @@ async function watchAndLikeStory(page, username) {
   const url = `https://www.instagram.com/stories/${username}/`;
   console.log(`👀 Visiting stories: ${url}`);
 
-  // Go to story link
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
   } catch {
@@ -170,16 +121,14 @@ async function watchAndLikeStory(page, username) {
     return true;
   }
 
-  // Check if redirected to profile → means no story
   const currentUrl = page.url();
-  if (currentUrl.includes("/stories/") === false) {
+  if (!currentUrl.includes("/stories/")) {
     console.log(`❌ No story — redirected to profile`);
     return true;
   }
 
   await randomDelay(2000, 4000);
 
-  // Add fake cursor
   await page.evaluate(() => {
     if (document.getElementById("fake-cursor")) return;
     const cursor = document.createElement("div");
@@ -208,7 +157,6 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  // Try official button first
   try {
     const [btn] = await page.$x("//button[contains(., 'View story')]");
     if (btn) {
@@ -219,11 +167,10 @@ async function watchAndLikeStory(page, username) {
     }
   } catch {}
 
-  // If not opened → fallback in tight zone
   if (!opened) {
     for (let i = 1; i <= 20; i++) {
-      const x = 595 + Math.floor(Math.random() * 30); // X: 595–625
-      const y = 455 + Math.floor(Math.random() * 20); // Y: 455–475
+      const x = 595 + Math.floor(Math.random() * 30);
+      const y = 455 + Math.floor(Math.random() * 20);
       await moveCursor(x, y);
       await page.mouse.click(x, y);
       await delay(100);
@@ -243,7 +190,6 @@ async function watchAndLikeStory(page, username) {
     return true;
   }
 
-  // Watch & like stories
   const maxStories = 1 + Math.floor(Math.random() * 2);
   for (let i = 0; i < maxStories; i++) {
     let liked = false;
@@ -279,13 +225,38 @@ async function watchAndLikeStory(page, username) {
   return true;
 }
 
+// ✅ Only reads, never writes usernames.txt
+async function fetchUsernamesFromPrivateRepo() {
+  const url = `https://api.github.com/repos/${REPO}/contents/data2/${USERNAMES}`;
+  const headers = {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: "application/vnd.github.v3.raw",
+  };
+
+  try {
+    const res = await axios.get(url, { headers });
+    let lines = res.data.split("\n").map(line => line.trim()).filter(Boolean);
+    const top20 = lines.slice(0, 20);
+
+    if (top20.length === 0) {
+      console.log(`⚠️ No usernames left to process.`);
+    } else {
+      console.log(`📥 Grabbed top ${top20.length} usernames`);
+    }
+
+    return top20;
+  } catch (err) {
+    console.log(`❌ Failed to fetch usernames: ${err.message}`);
+    return [];
+  }
+}
+
 function isSleepTime() {
   const now = dayjs().tz("Asia/Kolkata");
   const h = now.hour();
-  return h >= 22 || h < 08;
+  return h >= 22 || h < 8;
 }
 
-// ------------------- MAIN FLOW -------------------
 async function runMainAccount(account) {
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
   const page = await browser.newPage();
@@ -295,37 +266,6 @@ async function runMainAccount(account) {
   const hasSession = await loadSession(page, account.sessionFile);
   if (!hasSession) await login(page, account);
 
-  async function fetchUsernamesFromPrivateRepo() {
-  const url = `https://api.github.com/repos/${REPO}/contents/data2/${USERNAMES}`;
-  const headers = {
-    Authorization: `Bearer ${GITHUB_TOKEN}`,
-    Accept: "application/vnd.github.v3.raw"
-  };
-
-  try {
-    const res = await axios.get(url, { headers });
-    let lines = res.data.split("\n").map(line => line.trim()).filter(Boolean);
-    const top20 = lines.splice(0, 20);
-
-    if (top20.length === 0) {
-      console.log(`⚠️ No usernames left to process.`);
-      return [];
-    }
-
-    // Overwrite local usernames.txt with remaining
-    fs.writeFileSync(USERNAMES, lines.join("\n"));
-
-    // Upload updated usernames.txt back to GitHub
-    await uploadToGitHub(USERNAMES, USERNAMES);
-
-    console.log(`📥 Grabbed top ${top20.length}, ${lines.length} left.`);
-    return top20;
-  } catch (err) {
-    console.log(`❌ Failed to fetch usernames: ${err.message}`);
-    return [];
-  }
-}
-  // ✅ FIXED HERE: fetch usernames before use
   const usernames = await fetchUsernamesFromPrivateRepo();
   if (!usernames.length) {
     console.log("⚠️ No usernames to process");
@@ -342,7 +282,6 @@ async function runMainAccount(account) {
 }
 
 // ------------------- MAIN LOOP -------------------
-// ------------------- MAIN LOOP -------------------
 (async () => {
   while (true) {
     if (isSleepTime()) {
@@ -351,7 +290,6 @@ async function runMainAccount(account) {
       continue;
     }
 
-    // ✅ Run accounts one by one to prevent GitHub file conflicts
     for (const account of MAIN_ACCOUNTS) {
       await runMainAccount(account);
     }
