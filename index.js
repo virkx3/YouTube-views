@@ -182,7 +182,7 @@ async function watchAndLikeStory(page, username) {
 
   const moveCursor = async (x, y) => {
     await page.evaluate((x, y) => {
-      const c = document.getElementById('fake-cursor');
+      const c = document.getElementById("fake-cursor");
       if (c) {
         c.style.left = `${x}px`;
         c.style.top = `${y}px`;
@@ -193,7 +193,7 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  // 🔁 Fallback clicks only (skip 'View story' button)
+  // 🔁 Fallback clicks only (random tapping to open story)
   for (let i = 1; i <= 25; i++) {
     const x = 600 + Math.floor(Math.random() * 50 - 25);
     const y = 450 + Math.floor(Math.random() * 50 - 25);
@@ -218,22 +218,33 @@ async function watchAndLikeStory(page, username) {
   // ✅ Story opened — like only 1 story
   const likeBtn = await safeSelector(page, 'svg[aria-label="Like"]');
   if (likeBtn) {
-    const box = await likeBtn.boundingBox();
-    if (box) {
-      const x = box.x + box.width / 2;
-      const y = box.y + box.height / 2;
-      await moveCursor(x, y);
-      await page.mouse.click(x, y);
-      console.log("❤️ Liked story");
+    try {
+      const isAttached = await page.evaluate(el => document.body.contains(el), likeBtn);
+      if (!isAttached) {
+        console.log("⚠️ Like button is detached from DOM");
+      } else {
+        const box = await likeBtn.boundingBox();
+        if (box) {
+          const x = box.x + box.width / 2;
+          const y = box.y + box.height / 2;
+          await moveCursor(x, y);
+          await page.mouse.click(x, y);
+          console.log("❤️ Liked story");
+        } else {
+          console.log("⚠️ Like button found but bounding box is missing");
+        }
+      }
+    } catch (err) {
+      console.log("❌ Error while trying to like story:", err.message);
     }
   } else {
     console.log("💨 No like button found");
   }
 
+  // Skip next story but show fallback logging
   const nextBtn = await safeSelector(page, 'button[aria-label="Next"]');
   if (nextBtn) {
-    await nextBtn.click();
-    console.log("➡️ Next story (skipped — only watching 1)");
+    console.log("➡️ Next story available (but skipped — only watching 1)");
   } else {
     console.log("⏹️ No more stories");
   }
@@ -241,7 +252,6 @@ async function watchAndLikeStory(page, username) {
   await randomDelay(2000, 4000);
   return true;
 }
-
 function isSleepTime() {
   const now = dayjs().tz("Asia/Kolkata");
   const h = now.hour();
