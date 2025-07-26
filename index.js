@@ -164,7 +164,6 @@ async function watchAndLikeStory(page, username) {
   await page.goto(url, { waitUntil: "networkidle2" });
   await randomDelay(3000, 5000);
 
-  // Inject fake cursor
   await page.evaluate(() => {
     if (document.getElementById("fake-cursor")) return;
     const cursor = document.createElement("div");
@@ -182,7 +181,7 @@ async function watchAndLikeStory(page, username) {
 
   const moveCursor = async (x, y) => {
     await page.evaluate((x, y) => {
-      const c = document.getElementById("fake-cursor");
+      const c = document.getElementById('fake-cursor');
       if (c) {
         c.style.left = `${x}px`;
         c.style.top = `${y}px`;
@@ -193,20 +192,30 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  // 🔁 Fallback clicks only (random tapping to open story)
-  for (let i = 1; i <= 20; i++) {
-    const x = 600 + Math.floor(Math.random() * 50 - 25);
-    const y = 450 + Math.floor(Math.random() * 50 - 25);
-    await moveCursor(x, y);
-    await page.mouse.click(x, y);
-    await delay(700);
-
-    const like = await safeSelector(page, 'svg[aria-label="Like"]');
-    const close = await safeSelector(page, 'button[aria-label="Close"]');
-    if (like || close) {
+  try {
+    const [btn] = await page.$x("//button[contains(., 'View story')]");
+    if (btn) {
+      await moveCursor(600, 400);
+      await btn.click();
+      console.log(`✅ Clicked "View Story"`);
       opened = true;
-      console.log(`✅ Fallback click worked on try ${i} — story opened!`);
-      break;
+    }
+  } catch {}
+
+  if (!opened) {
+    for (let i = 1; i <= 25; i++) {
+      const x = 600 + Math.floor(Math.random() * 50 - 25);
+      const y = 450 + Math.floor(Math.random() * 50 - 25);
+      await moveCursor(x, y);
+      await page.mouse.click(x, y);
+      await delay(100);
+      const like = await page.$('svg[aria-label="Like"]');
+      const close = await page.$('button[aria-label="Close"]');
+      if (like || close) {
+        opened = true;
+        console.log(`✅ Fallback click worked on try ${i} — story opened!`);
+        break;
+      }
     }
   }
 
@@ -215,38 +224,39 @@ async function watchAndLikeStory(page, username) {
     return true;
   }
 
-  // ✅ Story opened — like only 1 story
-  const likeBtn = await safeSelector(page, 'svg[aria-label="Like"]');
-  if (likeBtn) {
-    try {
-      const isAttached = await page.evaluate(el => document.body.contains(el), likeBtn);
-      if (!isAttached) {
-        console.log("⚠️ Like button is detached from DOM");
-      } else {
-        const box = await likeBtn.boundingBox();
-        if (box) {
-          const x = box.x + box.width / 2;
-          const y = box.y + box.height / 2;
-          await moveCursor(x, y);
-          await page.mouse.click(x, y);
-          console.log("❤️ Liked story");
-        } else {
-          console.log("⚠️ Like button found but bounding box is missing");
-        }
-      }
-    } catch (err) {
-      console.log("❌ Error while trying to like story:", err.message);
+  const maxStories = 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < maxStories; i++) {
+    let liked = false;
+    const likeBtn = await page.$('svg[aria-label="Like"]');
+if (likeBtn) {
+  // Climb to closest button
+  const btn = await likeBtn.evaluateHandle(el => el.closest('button'));
+  if (btn) {
+    const box = await btn.boundingBox();
+    if (box) {
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await moveCursor(x, y);
+      await page.mouse.click(x, y); // Fallback style works
+      liked = true;
+      console.log(`❤️ Liked story`);
     }
-  } else {
-    console.log("💨 No like button found");
   }
+}
 
-  // Skip next story but show fallback logging
-  const nextBtn = await safeSelector(page, 'button[aria-label="Next"]');
-  if (nextBtn) {
-    console.log("➡️ Next story available (but skipped — only watching 1)");
-  } else {
-    console.log("⏹️ No more stories");
+    if (!liked) {
+      console.log(`💨 No like button found`);
+    }
+
+    const nextBtn = await page.$('button[aria-label="Next"]');
+    if (nextBtn) {
+      await nextBtn.click();
+      console.log(`➡️ Next story`);
+      await randomDelay(1000, 2000);
+    } else {
+      console.log(`⏹️ No more stories`);
+      break;
+    }
   }
 
   await randomDelay(2000, 3000);
