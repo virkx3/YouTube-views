@@ -173,7 +173,13 @@ async function watchAndLikeStory(page, username) {
       const y = 455 + Math.floor(Math.random() * 20);
       await moveCursor(x, y);
       await page.mouse.click(x, y);
-      await delay(100);
+      await delay(200);
+
+      const newUrl = page.url();
+      if (!newUrl.includes("/stories/")) {
+        console.log(`❌ Fallback click landed on profile — no story`);
+        return true;
+      }
 
       const like = await page.$('svg[aria-label="Like"]');
       const close = await page.$('button[aria-label="Close"]');
