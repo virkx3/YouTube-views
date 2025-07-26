@@ -268,9 +268,18 @@ async function runMainAccount(account) {
   const hasSession = await loadSession(page, account.sessionFile);
   if (!hasSession) await login(page, account);
 
-  await fetchFromGitHub(USERNAMES);
-  const local = fs.readFileSync(USERNAMES, "utf8");
-  const usernames = local.split("\n").map(l => l.trim()).filter(Boolean);
+  const USERNAMES_URL = "https://raw.githubusercontent.com/virkx3/igbot/refs/heads/main/data2/usernames.txt?token=GHSAT0AAAAAADGDFEXE737RX62DANNDSARU2EEPXMQ";
+
+  let usernames = [];
+  try {
+    const res = await axios.get(USERNAMES_URL);
+    const allUsernames = res.data.split("\n").map(l => l.trim()).filter(Boolean);
+    usernames = allUsernames.slice(0, 20);
+    console.log(`📥 Loaded ${usernames.length} usernames from GitHub`);
+  } catch (err) {
+    console.log(`❌ Failed to fetch usernames: ${err.message}`);
+    return;
+  }
 
   for (const username of usernames) {
     await watchAndLikeStory(page, username);
