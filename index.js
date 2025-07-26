@@ -327,6 +327,7 @@ async function runMainAccount(account) {
 }
 
 // ------------------- MAIN LOOP -------------------
+// ------------------- MAIN LOOP -------------------
 (async () => {
   while (true) {
     if (isSleepTime()) {
@@ -335,7 +336,10 @@ async function runMainAccount(account) {
       continue;
     }
 
-    await Promise.all(MAIN_ACCOUNTS.map(runMainAccount));
+    // ✅ Run accounts one by one to prevent GitHub file conflicts
+    for (const account of MAIN_ACCOUNTS) {
+      await runMainAccount(account);
+    }
 
     const breakMs = Math.floor(Math.random() * (4 - 2 + 1) + 2) * 60 * 1000;
     console.log(`⏸️ Waiting ${Math.round(breakMs / 60000)} minutes before next cycle...`);
