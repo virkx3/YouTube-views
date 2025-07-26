@@ -194,12 +194,12 @@ async function watchAndLikeStory(page, username) {
   let opened = false;
 
   // 🔁 Fallback clicks only (random tapping to open story)
-  for (let i = 1; i <= 25; i++) {
+  for (let i = 1; i <= 20; i++) {
     const x = 600 + Math.floor(Math.random() * 50 - 25);
     const y = 450 + Math.floor(Math.random() * 50 - 25);
     await moveCursor(x, y);
     await page.mouse.click(x, y);
-    await delay(1500);
+    await delay(700);
 
     const like = await safeSelector(page, 'svg[aria-label="Like"]');
     const close = await safeSelector(page, 'button[aria-label="Close"]');
@@ -249,7 +249,7 @@ async function watchAndLikeStory(page, username) {
     console.log("⏹️ No more stories");
   }
 
-  await randomDelay(2000, 4000);
+  await randomDelay(2000, 3000);
   return true;
 }
 function isSleepTime() {
@@ -274,7 +274,7 @@ async function runMainAccount(account) {
 
   for (const username of usernames) {
     await watchAndLikeStory(page, username);
-    await randomDelay(4000, 8000);
+    await randomDelay(1000, 3000);
   }
 
   await browser.close();
