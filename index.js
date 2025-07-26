@@ -29,6 +29,15 @@ function randomDelay(min, max) {
   return delay(Math.floor(Math.random() * (max - min + 1) + min));
 }
 
+async function safeSelector(page, selector, timeout = 5000) {
+  try {
+    await page.waitForSelector(selector, { timeout });
+    return await page.$(selector);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchFromGitHub(file) {
   try {
     const res = await axios.get(
@@ -184,71 +193,49 @@ async function watchAndLikeStory(page, username) {
 
   let opened = false;
 
-  // Try normal 'View story' button
-  try {
-    const [btn] = await page.$x("//button[contains(., 'View story')]");
-    if (btn) {
-      await moveCursor(600, 400);
-      await btn.click();
-      console.log("✅ Clicked 'View Story'");
+  // 🔁 Fallback clicks only (skip 'View story' button)
+  for (let i = 1; i <= 25; i++) {
+    const x = 600 + Math.floor(Math.random() * 50 - 25);
+    const y = 450 + Math.floor(Math.random() * 50 - 25);
+    await moveCursor(x, y);
+    await page.mouse.click(x, y);
+    await delay(1500);
+
+    const like = await safeSelector(page, 'svg[aria-label="Like"]');
+    const close = await safeSelector(page, 'button[aria-label="Close"]');
+    if (like || close) {
       opened = true;
-    }
-  } catch {}
-
-  // Fallback clicks if story not opened
-  if (!opened) {
-    for (let i = 1; i <= 25; i++) {
-      const x = 600 + Math.floor(Math.random() * 50 - 25);
-      const y = 450 + Math.floor(Math.random() * 50 - 25);
-      await moveCursor(x, y);
-      await page.mouse.click(x, y);
-      await delay(1500);
-
-      const like = await page.$('svg[aria-label="Like"]');
-      const close = await page.$('button[aria-label="Close"]');
-      if (like || close) {
-        opened = true;
-        console.log(`✅ Fallback click worked on try ${i} — story opened!`);
-        break;
-      }
+      console.log(`✅ Fallback click worked on try ${i} — story opened!`);
+      break;
     }
   }
 
   if (!opened) {
     console.log(`❌ No story found for @${username} (fallback failed)`);
-    return true; // still mark it as handled
+    return true;
   }
 
-  // Story open — like 1 story
-  const maxStories = 1 + Math.floor(Math.random() * 1);
-  for (let i = 0; i < maxStories; i++) {
-    let liked = false;
-    const likeBtn = await page.$('svg[aria-label="Like"]');
-    if (likeBtn) {
-      const box = await likeBtn.boundingBox();
-      if (box) {
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
-        await moveCursor(x, y);
-        await page.mouse.click(x, y);
-        liked = true;
-        console.log("❤️ Liked story");
-      }
+  // ✅ Story opened — like only 1 story
+  const likeBtn = await safeSelector(page, 'svg[aria-label="Like"]');
+  if (likeBtn) {
+    const box = await likeBtn.boundingBox();
+    if (box) {
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await moveCursor(x, y);
+      await page.mouse.click(x, y);
+      console.log("❤️ Liked story");
     }
+  } else {
+    console.log("💨 No like button found");
+  }
 
-    if (!liked) {
-      console.log("💨 No like button found");
-    }
-
-    const nextBtn = await page.$('button[aria-label="Next"]');
-    if (nextBtn) {
-      await nextBtn.click();
-      console.log("➡️ Next story");
-      await randomDelay(1500, 3000);
-    } else {
-      console.log("⏹️ No more stories");
-      break;
-    }
+  const nextBtn = await safeSelector(page, 'button[aria-label="Next"]');
+  if (nextBtn) {
+    await nextBtn.click();
+    console.log("➡️ Next story (skipped — only watching 1)");
+  } else {
+    console.log("⏹️ No more stories");
   }
 
   await randomDelay(2000, 4000);
