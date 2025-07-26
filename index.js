@@ -161,7 +161,12 @@ async function login(page, account) {
 async function watchAndLikeStory(page, username) {
   const url = `https://www.instagram.com/stories/${username}/`;
   console.log(`👀 Visiting stories: ${url}`);
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  try {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+} catch {
+  console.log(`⚠️ Could not load ${url} — skipping`);
+  return true;
+}
   await randomDelay(3000, 5000);
 
   await page.evaluate(() => {
