@@ -165,99 +165,99 @@ async function watchAndLikeStory(page, username) {
   await randomDelay(3000, 5000);
 
   await page.evaluate(() => {
-    if (document.getElementById("fake-cursor")) return;
-    const cursor = document.createElement("div");
-    cursor.id = "fake-cursor";
-    cursor.style.position = "fixed";
-    cursor.style.width = "20px";
-    cursor.style.height = "20px";
-    cursor.style.border = "2px solid red";
-    cursor.style.borderRadius = "50%";
-    cursor.style.zIndex = "9999";
-    cursor.style.pointerEvents = "none";
-    cursor.style.transition = "top 0.05s, left 0.05s";
-    document.body.appendChild(cursor);
-  });
+  if (document.getElementById("fake-cursor")) return;
+  const cursor = document.createElement("div");
+  cursor.id = "fake-cursor";
+  cursor.style.position = "fixed";
+  cursor.style.width = "20px";
+  cursor.style.height = "20px";
+  cursor.style.border = "2px solid red";
+  cursor.style.borderRadius = "50%";
+  cursor.style.zIndex = "9999";
+  cursor.style.pointerEvents = "none";
+  cursor.style.transition = "top 0.05s, left 0.05s";
+  document.body.appendChild(cursor);
+});
 
-  const moveCursor = async (x, y) => {
-    await page.evaluate((x, y) => {
-      const c = document.getElementById('fake-cursor');
-      if (c) {
-        c.style.left = `${x}px`;
-        c.style.top = `${y}px`;
-      }
-    }, x, y);
-    await page.mouse.move(x, y);
-  };
-
-  let opened = false;
-
-  try {
-    const [btn] = await page.$x("//button[contains(., 'View story')]");
-    if (btn) {
-      await moveCursor(600, 400);
-      await btn.click();
-      console.log(`✅ Clicked "View Story"`);
-      opened = true;
+const moveCursor = async (x, y) => {
+  await page.evaluate((x, y) => {
+    const c = document.getElementById('fake-cursor');
+    if (c) {
+      c.style.left = `${x}px`;
+      c.style.top = `${y}px`;
     }
-  } catch {}
+  }, x, y);
+  await page.mouse.move(x, y);
+};
 
-  if (!opened) {
-    for (let i = 1; i <= 25; i++) {
-      const x = 600 + Math.floor(Math.random() * 50 - 25);
-      const y = 450 + Math.floor(Math.random() * 50 - 25);
-      await moveCursor(x, y);
-      await page.mouse.click(x, y);
-      await delay(100);
-      const like = await page.$('svg[aria-label="Like"]');
-      const close = await page.$('button[aria-label="Close"]');
-      if (like || close) {
-        opened = true;
-        console.log(`✅ Fallback click worked on try ${i} — story opened!`);
-        break;
-      }
-    }
-  }
+let opened = false;
 
-  if (!opened) {
-    console.log(`❌ No story found for @${username} (fallback failed)`);
-    return true;
-  }
-
-  const maxStories = 1 + Math.floor(Math.random() * 2);
-  for (let i = 0; i < maxStories; i++) {
-    let liked = false;
-    const likeBtn = await page.$('svg[aria-label="Like"]');
-if (likeBtn) {
-  // Climb to closest button
-  const btn = await likeBtn.evaluateHandle(el => el.closest('button'));
+try {
+  const [btn] = await page.$x("//button[contains(., 'View story')]");
   if (btn) {
-    const box = await btn.boundingBox();
-    if (box) {
-      const x = box.x + box.width / 2;
-      const y = box.y + box.height / 2;
-      await moveCursor(x, y);
-      await page.mouse.click(x, y); // Fallback style works
-      liked = true;
-      console.log(`❤️ Liked story`);
+    await moveCursor(600, 400);
+    await btn.click();
+    console.log(`✅ Clicked "View Story"`);
+    opened = true;
+  }
+} catch {}
+
+if (!opened) {
+  for (let i = 1; i <= 25; i++) {
+    const x = 600 + Math.floor(Math.random() * 50 - 25);
+    const y = 450 + Math.floor(Math.random() * 50 - 25);
+    await moveCursor(x, y);
+    await page.mouse.click(x, y);
+    await delay(1500);
+    const like = await page.$('svg[aria-label="Like"]');
+    const close = await page.$('button[aria-label="Close"]');
+    if (like || close) {
+      opened = true;
+      console.log(`✅ Fallback click worked on try ${i} — story opened!`);
+      break;
     }
   }
 }
 
-    if (!liked) {
-      console.log(`💨 No like button found`);
-    }
+if (!opened) {
+  console.log(`❌ No story found for @${username} (fallback failed)`);
+  return true;
+}
 
-    const nextBtn = await page.$('button[aria-label="Next"]');
-    if (nextBtn) {
-      await nextBtn.click();
-      console.log(`➡️ Next story`);
-      await randomDelay(1000, 2000);
-    } else {
-      console.log(`⏹️ No more stories`);
-      break;
+const maxStories = 1 + Math.floor(Math.random() * 2);
+for (let i = 0; i < maxStories; i++) {
+  let liked = false;
+  const likeBtn = await page.$('svg[aria-label="Like"]');
+  if (likeBtn) {
+    try {
+      const box = await likeBtn.boundingBox();
+      if (box) {
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await moveCursor(x, y);
+        await page.mouse.click(x, y);
+        liked = true;
+        console.log(`❤️ Liked story`);
+      }
+    } catch (err) {
+      console.log(`⚠️ boundingBox failed: ${err.message}`);
     }
   }
+
+  if (!liked) {
+    console.log(`💨 No like button found`);
+  }
+
+  const nextBtn = await page.$('button[aria-label="Next"]');
+  if (nextBtn) {
+    await nextBtn.click();
+    console.log(`➡️ Next story`);
+    await randomDelay(1500, 3000);
+  } else {
+    console.log(`⏹️ No more stories`);
+    break;
+  }
+}
 
   await randomDelay(2000, 3000);
   return true;
